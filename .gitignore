@@ -19,3 +19,6 @@
 "# IDE" 
 ".vscode/" 
 ".idea/" 
+__pycache__/
+*.pyc
+backend/venv/
