@@ -197,3 +197,4 @@ INSERT INTO time_slots (day, slot_num, period, start_time, end_time) VALUES
 ('Friday',    3, 'morning',   '11:30', '13:00'),
 ('Friday',    4, 'afternoon', '13:45', '15:15'),
 ('Friday',    5, 'afternoon', '15:30', '17:00');
+
