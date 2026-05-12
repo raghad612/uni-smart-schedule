@@ -1,6 +1,0 @@
-[
-  "tests/test_auth.py::test_correct_admin_credentials_return_token",
-  "tests/test_auth.py::test_correct_instructor_credentials_return_token",
-  "tests/test_auth.py::test_wrong_email_returns_404",
-  "tests/test_auth.py::test_wrong_password_returns_401"
-]
