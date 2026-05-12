@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.api import scheduling
 
 app = FastAPI(
     title="Smart Instructor Scheduling System",
@@ -14,6 +15,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(scheduling.router, prefix="/scheduling", tags=["scheduling"])
 
 @app.get("/health")
 def health_check():
