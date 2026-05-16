@@ -20,8 +20,6 @@ class InstructorResponse(BaseModel):
     type: str
     required_sessions: int
     max_sessions_per_day: int
-    is_active: bool
-    availability_submitted: bool = False
 
     class Config:
         from_attributes = True
