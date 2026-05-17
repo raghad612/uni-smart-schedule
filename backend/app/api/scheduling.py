@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
+from app.core.dependencies import require_admin
+from app.models.user import User
 from app.models.time_slot import TimeSlot
 from app.services.scheduling_engine import (
     load_data,
@@ -16,8 +18,6 @@ from app.services.scheduling_engine import (
 
 router = APIRouter()
 
-TEMP_API_KEY = "schedule-dev-key"
-
 
 class RunEngineRequest(BaseModel):
     semester: str
@@ -28,12 +28,9 @@ class RunEngineRequest(BaseModel):
 @router.post("/run")
 def run_scheduling_engine(
     body: RunEngineRequest,
-    x_api_key: str = Header(...),
     db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
 ):
-    if x_api_key != TEMP_API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-
     # Step 1 — load
     instructors, course_instances, availability = load_data(db, body.semester)
 
@@ -83,7 +80,7 @@ def run_scheduling_engine(
         assignments=assignments,
         conflicts=conflicts,
         semester=body.semester,
-        created_by=4,  # temp: hardcoded admin user id until JWT is merged
+        created_by=admin.id,
         notes=notes,
     )
 
