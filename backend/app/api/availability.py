@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
-from app.core.dependencies import require_admin, require_instructor, get_current_user
+from app.core.dependencies import require_admin, require_instructor
 from app.models.availability import Availability
 from app.models.instructor import Instructor
 from app.models.user import User
@@ -10,7 +10,7 @@ from app.schemas.availability import AvailabilitySubmit, AvailabilityResponse
 
 router = APIRouter()
 
-@router.post("/", response_model=AvailabilityResponse, status_code=201)
+@router.post("/", response_model=list[AvailabilityResponse], status_code=201)
 def submit_availability(
     payload: AvailabilitySubmit,
     db: Session = Depends(get_db),
@@ -39,11 +39,11 @@ def submit_availability(
 
     db.commit()
 
-    result = db.query(Availability).filter(
+    return db.query(Availability).filter(
         Availability.instructor_id == instructor.id,
         Availability.semester == payload.semester
-    ).first()
-    return result
+    ).all()
+
 
 @router.get("/me", response_model=List[AvailabilityResponse])
 def get_my_availability(
@@ -54,6 +54,7 @@ def get_my_availability(
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor profile not found")
     return db.query(Availability).filter(Availability.instructor_id == instructor.id).all()
+
 
 @router.get("/{instructor_id}", response_model=List[AvailabilityResponse])
 def get_instructor_availability(
