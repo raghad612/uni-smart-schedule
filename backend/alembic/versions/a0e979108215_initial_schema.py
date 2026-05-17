@@ -149,7 +149,7 @@ def upgrade() -> None:
     sa.Column('proposal_id', sa.Integer(), nullable=False),
     sa.Column('course_instance_id', sa.Integer(), nullable=False),
     sa.Column('slot_id', sa.Integer(), nullable=False),
-    sa.Column('room_id', sa.Integer(), nullable=False),
+    sa.Column('room_id', sa.Integer(), nullable=True),
     sa.Column('week_rotation', sa.Enum('ALWAYS', 'WEEK_A', 'WEEK_B', name='weekrotation'), nullable=False),
     sa.Column('status', sa.Enum('proposed', 'approved', 'rejected', name='assignmentstatus'), nullable=False),
     sa.ForeignKeyConstraint(['course_instance_id'], ['course_instances.id'], ),

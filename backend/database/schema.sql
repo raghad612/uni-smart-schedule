@@ -161,7 +161,7 @@ CREATE TABLE schedule_assignments (
 CREATE TABLE conflict_log (
     id            SERIAL PRIMARY KEY,
     proposal_id   INTEGER NOT NULL REFERENCES schedule_proposals(id) ON DELETE CASCADE,
-    slot_id       INTEGER NOT NULL REFERENCES time_slots(id) ON DELETE RESTRICT,
+    slot_id       INTEGER  REFERENCES time_slots(id) ON DELETE SET NULL,
     conflict_type VARCHAR(100) NOT NULL,
     resolution    TEXT,
     resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
