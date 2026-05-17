@@ -31,9 +31,9 @@ def test_correct_instructor_credentials_return_token():
     assert "access_token" in data
     assert data["role"] == "INSTRUCTOR"
 
-def test_wrong_email_returns_404():
+def test_wrong_email_returns_401():
     response = client.post("/auth/login", json={
         "email": "notexist@test.com",
         "password": "test123"
     })
-    assert response.status_code == 404
+    assert response.status_code == 401
