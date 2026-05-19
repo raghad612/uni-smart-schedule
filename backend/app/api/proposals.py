@@ -9,6 +9,8 @@ from app.models.schedule_proposal import ScheduleProposal
 from app.models.schedule_assignment import ScheduleAssignment
 from app.models.conflict_log import ConflictLog
 from app.models.time_slot import TimeSlot
+from app.models.course_instance import CourseInstance
+from app.models.room import Room
 from app.models.enums import ProposalStatus
 from app.schemas.proposals import (
     ProposalResponse,
@@ -51,21 +53,28 @@ def get_proposal(
         .all()
     )
 
-    assignments = [
-        AssignmentResponse(
-            id=a.id,
-            course_instance_id=a.course_instance_id,
-            slot_id=a.slot_id,
-            room_id=a.room_id,
-            week_rotation=a.week_rotation,
-            status=a.status,
-            day=ts.day,
-            slot_num=ts.slot_num,
-            start_time=ts.start_time,
-            end_time=ts.end_time,
+    assignments = []
+    for a, ts in raw_assignments:
+        course_instance = db.query(CourseInstance).filter(CourseInstance.id == a.course_instance_id).first()
+        room = db.query(Room).filter(Room.id == a.room_id).first() if a.room_id else None
+
+        assignments.append(
+            AssignmentResponse(
+                id=a.id,
+                course_instance_id=a.course_instance_id,
+                slot_id=a.slot_id,
+                room_id=a.room_id,
+                week_rotation=a.week_rotation,
+                status=a.status,
+                day=ts.day,
+                slot_num=ts.slot_num,
+                start_time=ts.start_time,
+                end_time=ts.end_time,
+                instructor_name=course_instance.instructor.name if course_instance and course_instance.instructor else None,
+                subject_name=course_instance.subject.name if course_instance and course_instance.subject else None,
+                room_name=room.room_name if room else None,
+            )
         )
-        for a, ts in raw_assignments
-    ]
 
     conflicts = (
         db.query(ConflictLog)
