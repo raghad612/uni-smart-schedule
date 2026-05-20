@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
 
-// --- CONSTANTES MISES À JOUR ---
+// --- CONSTANTES COHÉRENTES AVEC LA BASE DE DONNÉES (1h30 par session) ---
 const slotDetails = {
-  1: { label: 'Session 1', time: '08:00–09:30' },
-  2: { label: 'Session 2', time: '09:45–11:15' },
-  3: { label: 'Session 3', time: '11:30–13:00' },
-  4: { label: 'Session 4', time: '13:45–15:15' },
-  5: { label: 'Session 5', time: '15:30–17:00' },
-  6: { label: 'Session 6', time: '17:15–18:45' }, 
+  1: { label: 'Session 1', time: '08:00–09:30' }, 
+  2: { label: 'Session 2', time: '09:45–11:15' }, 
+  3: { label: 'Session 3', time: '11:30–13:00' }, 
+  4: { label: 'Session 4', time: '13:45–15:15' }, 
+  5: { label: 'Session 5', time: '15:30–17:00' }, 
 };
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -57,29 +56,62 @@ function StatCard({ icon, label, value, sub, color }) {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [notes, setNotes] = useState('');
-  const [semester, setSemester] = useState('2026-2');
+  
+  // Synchronisé sur ton jeu de données de test (seed_test_data.sql)
+  const [semester, setSemester] = useState('2024-2'); 
   const [activeProposal, setActiveProposal] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // API : /instructors/ (List Instructors)
   const { data: instructors = [], isLoading } = useQuery({
     queryKey: ['instructors'],
     queryFn: () => api.get('/instructors/').then(r => r.data),
   });
 
+  // API : /proposals/{proposal_id} (Get Proposal)
   const { data: proposal } = useQuery({
     queryKey: ['proposal', activeProposal],
     queryFn: () => api.get(`/proposals/${activeProposal}`).then(r => r.data),
     enabled: !!activeProposal,
   });
 
+  // API : /proposals/{proposal_id}/conflicts (List Conflicts)
+  const { data: conflicts = [] } = useQuery({
+    queryKey: ['conflicts', activeProposal],
+    queryFn: () => api.get(`/proposals/${activeProposal}/conflicts`).then(r => r.data),
+    enabled: !!activeProposal,
+  });
+
+  // API : /scheduling/run (Run Scheduling Engine)
   const runMutation = useMutation({
-    mutationFn: () => api.post('/scheduling/run', { semester, notes }),
+    mutationFn: () => api.post('/scheduling/run', { semester, notes, simulation: false }),
     onSuccess: (res) => {
       setActiveProposal(res.data.proposal_id);
       toast.success(`Schedule generated! ${res.data.assignments_count} classes placed.`);
     },
     onError: () => toast.error('Error during generation.'),
+  });
+
+  // API : /proposals/{proposal_id}/approve (Approve Proposal)
+  const approveMutation = useMutation({
+    mutationFn: () => api.post(`/proposals/${activeProposal}/approve`),
+    onSuccess: () => {
+      toast.success('Proposal approved successfully!');
+      queryClient.invalidateQueries(['proposal', activeProposal]);
+    },
+    onError: () => toast.error('Failed to approve proposal.'),
+  });
+
+  // API : /proposals/{proposal_id}/reject (Reject Proposal)
+  const rejectMutation = useMutation({
+    mutationFn: () => api.post(`/proposals/${activeProposal}/reject`),
+    onSuccess: () => {
+      toast.error('Proposal marked as rejected.');
+      queryClient.invalidateQueries(['proposal', activeProposal]);
+    },
+    onError: () => toast.error('Failed to reject proposal.'),
   });
 
   const filteredInstructors = instructors.filter(i => 
@@ -97,7 +129,7 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard label="Instructors" value={instructors.length} sub="Total registered" color="#60a5fa" icon="👥" />
           <StatCard label="Responses" value={submittedCount} sub={`${instructors.length - submittedCount} pending`} color="#34d399" icon="✅" />
-          <StatCard label="Conflicts" value={proposal?.conflicts_count ?? 0} sub="Issues to resolve" color="#f87171" icon="⚠️" />
+          <StatCard label="Conflicts" value={activeProposal ? conflicts.length : 0} sub="Issues to resolve" color="#f87171" icon="⚠️" />
           <StatCard label="Semester" value={semester} sub="Active period" color="#a78bfa" icon="📅" />
         </div>
 
@@ -110,7 +142,7 @@ export default function AdminDashboard() {
                 <input 
                   value={semester} onChange={e => setSemester(e.target.value)}
                   className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none"
-                  placeholder="Semester (ex: 2026-2)"
+                  placeholder="Semester (ex: 2024-2)"
                 />
                 <textarea 
                   value={notes} onChange={e => setNotes(e.target.value)}
@@ -125,6 +157,7 @@ export default function AdminDashboard() {
                   {runMutation.isPending ? 'Running Engine...' : '⚡ Generate New Schedule'}
                 </button>
 
+                {/* Seul ce bouton d'historique reste, ce qui est parfait pour le MVP */}
                 <button 
                   onClick={() => navigate('/proposals')}
                   className="w-full bg-white/5 hover:bg-white/10 border border-white/10 py-3 rounded-xl font-bold text-[10px] text-white/40 hover:text-white uppercase tracking-widest transition-all"
@@ -163,12 +196,12 @@ export default function AdminDashboard() {
           </div>
 
           <div className="lg:col-span-8">
-            {proposal?.conflicts_count > 0 && (
+            {conflicts.length > 0 && (
               <div className="mb-6 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <span className="text-2xl">⚠️</span>
                   <div>
-                    <h4 className="text-red-400 font-bold text-sm">Action Required: {proposal.conflicts_count} Conflicts detected</h4>
+                    <h4 className="text-red-400 font-bold text-sm">Action Required: {conflicts.length} Conflicts detected</h4>
                     <p className="text-[11px] text-red-400/60 uppercase">Algorithmic overlaps found.</p>
                   </div>
                 </div>
@@ -183,8 +216,30 @@ export default function AdminDashboard() {
 
             <div className="bg-[#0a1628] rounded-[2.5rem] border border-white/10 p-8 shadow-2xl min-h-[600px]">
               <div className="flex justify-between items-center mb-8">
-                <h2 className="text-xl font-bold italic text-blue-400">Master Timetable Preview</h2>
-                {proposal && <span className="text-[10px] bg-white/5 px-3 py-1 rounded-full border border-white/10 text-white/40">REF: #{proposal.id}</span>}
+                <div>
+                  <h2 className="text-xl font-bold italic text-blue-400">Master Timetable Preview</h2>
+                  {proposal && <span className="text-[10px] text-white/40 block mt-1">Status: <span className="text-blue-400 font-bold uppercase">{proposal.status}</span></span>}
+                </div>
+                
+                {proposal && (
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => approveMutation.mutate()}
+                      disabled={approveMutation.isPending || proposal.status === 'APPROVED'}
+                      className="bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase disabled:opacity-30"
+                    >
+                      Approve
+                    </button>
+                    <button 
+                      onClick={() => rejectMutation.mutate()}
+                      disabled={rejectMutation.isPending || proposal.status === 'REJECTED'}
+                      className="bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase disabled:opacity-30"
+                    >
+                      Reject
+                    </button>
+                    <span className="text-[10px] bg-white/5 px-3 py-1.5 rounded-lg border border-white/10 text-white/40">REF: #{proposal.id}</span>
+                  </div>
+                )}
               </div>
 
               {!proposal ? (
@@ -202,11 +257,9 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {/* MAP SUR LES 6 SESSIONS */}
-                      {[1, 2, 3, 4, 5, 6].map(slot => (
+                      {[1, 2, 3, 4, 5].map(slot => (
                         <tr key={slot}>
                           <td className="p-2 border-r border-white/5 text-left min-w-[110px]">
-                            {/* Affichage : Session en bleu et Heure en dessous */}
                             <div className="text-[11px] font-black text-blue-400 uppercase tracking-tighter">
                               {slotDetails[slot].label}
                             </div>
@@ -215,7 +268,7 @@ export default function AdminDashboard() {
                             </div>
                           </td>
                           {days.map((_, dayIdx) => {
-                            const slotId = dayIdx * 6 + slot; // On multiplie par 6 maintenant car il y a 6 slots par jour
+                            const slotId = (dayIdx * 5) + slot; 
                             const assignment = proposal.assignments?.find(a => a.slot_id === slotId);
                             
                             return (
