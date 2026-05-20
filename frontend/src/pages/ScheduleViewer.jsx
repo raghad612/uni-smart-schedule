@@ -8,12 +8,11 @@ const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
 // Configuration des horaires pour 6 sessions
 const sessionTimes = {
-  1: '08:00–09:30', 
-  2: '09:45–11:15', 
-  3: '11:30–13:00',
-  4: '13:45–15:15', 
-  5: '15:30–17:00',
-  6: '17:15–18:45',
+  1: '08:00–09:45', 
+  2: '10:00–11:45', 
+  3: '12:00–13:45', 
+  4: '14:30–16:15', 
+  5: '16:30–18:15', 
 };
 
 export default function ScheduleViewer() {
@@ -123,7 +122,7 @@ export default function ScheduleViewer() {
               </thead>
               <tbody>
                 {/* Boucle sur les 6 SESSIONS */}
-                {[1, 2, 3, 4, 5, 6].map(slot => (
+                {[1, 2, 3, 4, 5].map(slot => (
                   <tr key={slot}>
                     <td className="pr-8 py-6 border-r border-white/5 text-right">
                       <div className="text-xs font-black text-blue-400 uppercase tracking-tighter">Session {slot}</div>
@@ -132,7 +131,7 @@ export default function ScheduleViewer() {
                     
                     {days.map((_, di) => {
                       // ID basé sur 6 sessions par jour
-                      const slotId = di * 6 + slot;
+                      const slotId = di * 5 + slot;
                       const a = getAssignment(slotId);
                       
                       return (

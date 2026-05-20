@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { saveToken, getUserRole } from '../utils/auth';
+
+
 import api from '../utils/api';
-import { saveToken } from '../utils/auth';
+
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -14,19 +17,35 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError('');
+    
     try {
+      // 1. Appel unique à l'API
       const res = await api.post('/auth/login', { email, password });
-      saveToken(res.data.access_token);
-      const role = res.data.role;
-      if (role === 'ADMIN') navigate('/admin');
-      else navigate('/instructor');
+      
+      // 2. Sauvegarde centralisée et propre du token
+      const token = res.data.access_token;
+      saveToken(token); 
+
+      // 3. Décodage dynamique du rôle utilisateur depuis le token enregistré
+      const role = getUserRole();
+      
+      // 4. Redirection conditionnelle stricte basée sur le rôle réel
+      if (role === 'ADMIN') {
+        navigate('/admin');
+      } else if (role === 'INSTRUCTOR') {
+        navigate('/instructor');
+      } else {
+        // Sécurité si le rôle ne correspond à rien de connu
+        setError('Unauthorized access: Unknown user role.');
+      }
+
     } catch (err) {
+      console.error("Login Error:", err.response?.data || err.message);
       setError(err.response?.data?.detail || 'Invalid credentials. Please try again.');
     } finally {
       setLoading(false);
     }
   };
-
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center px-4"
@@ -128,7 +147,7 @@ export default function LoginPage() {
       </div>
 
       <p className="mt-8 text-xs text-center" style={{ color: 'rgba(255,255,255,0.2)' }}>
-        © 2026 UniSchedule · University Scheduling System
+        ©️ 2026 UniSchedule · University Scheduling System
       </p>
     </div>
   );

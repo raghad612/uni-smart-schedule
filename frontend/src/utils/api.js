@@ -1,17 +1,4 @@
- //import axios from 'axios';
-//import { getToken } from './auth';
 
-// const api = axios.create({
-//   baseURL: 'http://localhost:8000',
-// });
-
-// api.interceptors.request.use((config) => {
-//   const token = getToken();
-//   if (token) {
-//     config.headers.Authorization = `Bearer ${token}`;
-//   }
-//   return config;
-// });
 
 
 
@@ -36,11 +23,27 @@
 // };
 
 
+// import axios from 'axios';
+// import { getToken } from './auth';
+
+// const api = axios.create({
+//   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+// });
+
+// api.interceptors.request.use((config) => {
+//   const token = getToken();
+//   if (token) {
+//     config.headers.Authorization = `Bearer ${token}`;
+//   }
+//   return config;
+// });
+
+// export default api;
 import axios from 'axios';
 import { getToken } from './auth';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: '/api',  // ← utilise le proxy Vite au lieu de localhost:8000
 });
 
 api.interceptors.request.use((config) => {
