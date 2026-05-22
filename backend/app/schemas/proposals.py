@@ -25,6 +25,9 @@ class AssignmentResponse(BaseModel):
     slot_num: int
     start_time: time
     end_time: time
+    instructor_name: Optional[str] = None
+    subject_name: Optional[str] = None
+    room_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

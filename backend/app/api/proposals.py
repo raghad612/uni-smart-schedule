@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 
 from app.core.database import get_db
@@ -9,6 +9,8 @@ from app.models.schedule_proposal import ScheduleProposal
 from app.models.schedule_assignment import ScheduleAssignment
 from app.models.conflict_log import ConflictLog
 from app.models.time_slot import TimeSlot
+from app.models.course_instance import CourseInstance
+from app.models.room import Room
 from app.models.enums import ProposalStatus
 from app.schemas.proposals import (
     ProposalResponse,
@@ -47,6 +49,11 @@ def get_proposal(
     raw_assignments = (
         db.query(ScheduleAssignment, TimeSlot)
         .join(TimeSlot, ScheduleAssignment.slot_id == TimeSlot.id)
+        .options(
+            joinedload(ScheduleAssignment.course_instance).joinedload(CourseInstance.instructor),
+            joinedload(ScheduleAssignment.course_instance).joinedload(CourseInstance.subject),
+            joinedload(ScheduleAssignment.room),
+        )
         .filter(ScheduleAssignment.proposal_id == proposal_id)
         .all()
     )
@@ -63,6 +70,9 @@ def get_proposal(
             slot_num=ts.slot_num,
             start_time=ts.start_time,
             end_time=ts.end_time,
+            instructor_name=a.course_instance.instructor.name if a.course_instance and a.course_instance.instructor else None,
+            subject_name=a.course_instance.subject.name if a.course_instance and a.course_instance.subject else None,
+            room_name=a.room.room_name if a.room else None,
         )
         for a, ts in raw_assignments
     ]
