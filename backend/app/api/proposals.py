@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 
 from app.core.database import get_db
@@ -49,32 +49,33 @@ def get_proposal(
     raw_assignments = (
         db.query(ScheduleAssignment, TimeSlot)
         .join(TimeSlot, ScheduleAssignment.slot_id == TimeSlot.id)
+        .options(
+            joinedload(ScheduleAssignment.course_instance).joinedload(CourseInstance.instructor),
+            joinedload(ScheduleAssignment.course_instance).joinedload(CourseInstance.subject),
+            joinedload(ScheduleAssignment.room),
+        )
         .filter(ScheduleAssignment.proposal_id == proposal_id)
         .all()
     )
 
-    assignments = []
-    for a, ts in raw_assignments:
-        course_instance = db.query(CourseInstance).filter(CourseInstance.id == a.course_instance_id).first()
-        room = db.query(Room).filter(Room.id == a.room_id).first() if a.room_id else None
-
-        assignments.append(
-            AssignmentResponse(
-                id=a.id,
-                course_instance_id=a.course_instance_id,
-                slot_id=a.slot_id,
-                room_id=a.room_id,
-                week_rotation=a.week_rotation,
-                status=a.status,
-                day=ts.day,
-                slot_num=ts.slot_num,
-                start_time=ts.start_time,
-                end_time=ts.end_time,
-                instructor_name=course_instance.instructor.name if course_instance and course_instance.instructor else None,
-                subject_name=course_instance.subject.name if course_instance and course_instance.subject else None,
-                room_name=room.room_name if room else None,
-            )
+    assignments = [
+        AssignmentResponse(
+            id=a.id,
+            course_instance_id=a.course_instance_id,
+            slot_id=a.slot_id,
+            room_id=a.room_id,
+            week_rotation=a.week_rotation,
+            status=a.status,
+            day=ts.day,
+            slot_num=ts.slot_num,
+            start_time=ts.start_time,
+            end_time=ts.end_time,
+            instructor_name=a.course_instance.instructor.name if a.course_instance and a.course_instance.instructor else None,
+            subject_name=a.course_instance.subject.name if a.course_instance and a.course_instance.subject else None,
+            room_name=a.room.room_name if a.room else None,
         )
+        for a, ts in raw_assignments
+    ]
 
     conflicts = (
         db.query(ConflictLog)

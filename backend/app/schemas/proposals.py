@@ -3,13 +3,16 @@ from datetime import datetime, time
 from typing import Optional
 from app.models.enums import ProposalStatus, AssignmentStatus, WeekRotation
 
+
 class ProposalResponse(BaseModel):
     id: int
     semester: str
     status: ProposalStatus
     notes: Optional[str]
     created_at: datetime
+
     model_config = {"from_attributes": True}
+
 
 class AssignmentResponse(BaseModel):
     id: int
@@ -25,7 +28,9 @@ class AssignmentResponse(BaseModel):
     instructor_name: Optional[str] = None
     subject_name: Optional[str] = None
     room_name: Optional[str] = None
+
     model_config = {"from_attributes": True}
+
 
 class ConflictResponse(BaseModel):
     id: int
@@ -34,7 +39,9 @@ class ConflictResponse(BaseModel):
     resolution: Optional[str]
     resolved_by: Optional[int]
     detected_at: datetime
+
     model_config = {"from_attributes": True}
+
 
 class ProposalDetail(BaseModel):
     id: int
@@ -44,7 +51,9 @@ class ProposalDetail(BaseModel):
     created_at: datetime
     assignments: list[AssignmentResponse]
     conflicts: list[ConflictResponse]
+
     model_config = {"from_attributes": True}
+
 
 class ResolveConflict(BaseModel):
     resolution: str
