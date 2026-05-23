@@ -31,7 +31,7 @@ def run_scheduling_engine(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    # Step 1 — load
+    # Step 1 - load
     instructors, course_instances, availability = load_data(db, body.semester)
 
     if not course_instances:
@@ -40,8 +40,8 @@ def run_scheduling_engine(
             detail=f"No course instances found for semester '{body.semester}'"
         )
 
-    # Step 2 — validate
-    validation_errors = validate_availability(instructors, availability)
+    # Step 2 - validate
+    validation_errors = validate_availability(instructors, availability, course_instances)
     if validation_errors:
         return {
             "proposal_id": None,
@@ -51,26 +51,26 @@ def run_scheduling_engine(
             "validation_errors": validation_errors,
         }
 
-    # Step 3 — sort
+    # Step 3 - sort
     sorted_instructors = sort_instructors(instructors)
 
-    # Step 4 — assign
+    # Step 4 - assign
     assignments, assign_conflicts = assign_slots(
         sorted_instructors, course_instances, availability
     )
 
-    # Step 5 — gap score
+    # Step 5 - gap score
     time_slots = db.query(TimeSlot).all()
     gap_score = calculate_gap_score(assignments, time_slots)
 
-    # Step 6 — optimise
+    # Step 6 - optimise
     assignments = optimise_gaps(assignments, time_slots)
 
-    # Step 7 — detect conflicts
+    # Step 7 - detect conflicts
     conflicts = detect_conflicts(assignments)
     conflicts.extend(assign_conflicts)
 
-    # Step 8 — save
+    # Step 8 - save
     notes = body.notes
     if body.simulation:
         notes = f"[SIMULATION] {notes}".strip()

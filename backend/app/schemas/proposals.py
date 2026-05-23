@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import datetime, time
+from datetime import datetime
 from typing import Optional
 from app.models.enums import ProposalStatus, AssignmentStatus, WeekRotation
 
@@ -23,8 +23,8 @@ class AssignmentResponse(BaseModel):
     status: AssignmentStatus
     day: str
     slot_num: int
-    start_time: time
-    end_time: time
+    start_time: str
+    end_time: str
     instructor_name: Optional[str] = None
     subject_name: Optional[str] = None
     room_name: Optional[str] = None

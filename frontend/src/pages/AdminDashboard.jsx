@@ -7,11 +7,11 @@ import { removeToken } from '../utils/auth';
 
 // --- CONSTANTES COHÉRENTES AVEC LA BASE DE DONNÉES (1h30 par session) ---
 const slotDetails = {
-  1: { label: 'Session 1', time: '08:00–09:30' }, 
-  2: { label: 'Session 2', time: '09:45–11:15' }, 
-  3: { label: 'Session 3', time: '11:30–13:00' }, 
-  4: { label: 'Session 4', time: '13:45–15:15' }, 
-  5: { label: 'Session 5', time: '15:30–17:00' }, 
+  1: { label: 'Session 1', time: '08:00–09:40' },
+  2: { label: 'Session 2', time: '09:55–11:35' },
+  3: { label: 'Session 3', time: '12:00–13:40' },
+  4: { label: 'Session 4', time: '14:00–15:40' },
+  5: { label: 'Session 5', time: '16:00–17:40' },
 };
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -163,6 +163,12 @@ export default function AdminDashboard() {
                   className="w-full bg-white/5 hover:bg-white/10 border border-white/10 py-3 rounded-xl font-bold text-[10px] text-white/40 hover:text-white uppercase tracking-widest transition-all"
                 >
                   📁 View History & Archives
+                </button>
+                <button
+                    onClick={() => navigate('/data')}
+                    className="w-full bg-white/5 hover:bg-white/10 border border-white/10 py-3 rounded-xl font-bold text-[10px] text-white/40 hover:text-white uppercase tracking-widest transition-all"
+                >
+                    ⚙️ Manage Data
                 </button>
               </div>
             </div>

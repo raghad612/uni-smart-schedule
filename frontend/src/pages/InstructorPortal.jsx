@@ -6,11 +6,10 @@ import api from '../utils/api';
 import { removeToken } from '../utils/auth';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-const slotTimes = { 
-  1: '08:00–09:30', 2: '09:45–11:15', 3: '11:30–13:00', 
-  4: '13:45–15:15', 5: '15:30–17:00' 
+const slotTimes = {
+  1: '08:00–09:40', 2: '09:55–11:35', 3: '12:00–13:40',
+  4: '14:00–15:40', 5: '16:00–17:40'
 };
-
 const prefConfig = {
   PREFERRED: { label: 'Preferred', short: 'P', color: '#34d399', bg: 'rgba(52,211,153,0.13)', border: 'rgba(52,211,153,0.35)' },
   AVAILABLE: { label: 'Available', short: 'A', color: '#60a5fa', bg: 'rgba(96,165,250,0.13)', border: 'rgba(96,165,250,0.35)' },

@@ -58,6 +58,7 @@ CREATE TABLE rooms (
     room_type   VARCHAR(50) NOT NULL DEFAULT 'lecture',
     description TEXT
 );
+
 -- ============================================================
 -- TABLE 4: sections
 -- ============================================================
@@ -161,7 +162,7 @@ CREATE TABLE schedule_assignments (
 CREATE TABLE conflict_log (
     id            SERIAL PRIMARY KEY,
     proposal_id   INTEGER NOT NULL REFERENCES schedule_proposals(id) ON DELETE CASCADE,
-    slot_id       INTEGER  REFERENCES time_slots(id) ON DELETE SET NULL,
+    slot_id       INTEGER REFERENCES time_slots(id) ON DELETE SET NULL,
     conflict_type VARCHAR(100) NOT NULL,
     resolution    TEXT,
     resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -172,29 +173,28 @@ CREATE TABLE conflict_log (
 -- SEED: time_slots (25 rows — 5 days × 5 sessions)
 -- ============================================================
 INSERT INTO time_slots (day, slot_num, period, start_time, end_time) VALUES
-('Monday',    1, 'morning',   '08:00', '09:30'),
-('Monday',    2, 'morning',   '09:45', '11:15'),
-('Monday',    3, 'morning',   '11:30', '13:00'),
-('Monday',    4, 'afternoon', '13:45', '15:15'),
-('Monday',    5, 'afternoon', '15:30', '17:00'),
-('Tuesday',   1, 'morning',   '08:00', '09:30'),
-('Tuesday',   2, 'morning',   '09:45', '11:15'),
-('Tuesday',   3, 'morning',   '11:30', '13:00'),
-('Tuesday',   4, 'afternoon', '13:45', '15:15'),
-('Tuesday',   5, 'afternoon', '15:30', '17:00'),
-('Wednesday', 1, 'morning',   '08:00', '09:30'),
-('Wednesday', 2, 'morning',   '09:45', '11:15'),
-('Wednesday', 3, 'morning',   '11:30', '13:00'),
-('Wednesday', 4, 'afternoon', '13:45', '15:15'),
-('Wednesday', 5, 'afternoon', '15:30', '17:00'),
-('Thursday',  1, 'morning',   '08:00', '09:30'),
-('Thursday',  2, 'morning',   '09:45', '11:15'),
-('Thursday',  3, 'morning',   '11:30', '13:00'),
-('Thursday',  4, 'afternoon', '13:45', '15:15'),
-('Thursday',  5, 'afternoon', '15:30', '17:00'),
-('Friday',    1, 'morning',   '08:00', '09:30'),
-('Friday',    2, 'morning',   '09:45', '11:15'),
-('Friday',    3, 'morning',   '11:30', '13:00'),
-('Friday',    4, 'afternoon', '13:45', '15:15'),
-('Friday',    5, 'afternoon', '15:30', '17:00');
-
+('Monday',    1, 'morning',   '08:00', '09:40'),
+('Monday',    2, 'morning',   '09:55', '11:35'),
+('Monday',    3, 'morning',   '12:00', '13:40'),
+('Monday',    4, 'afternoon', '14:00', '15:40'),
+('Monday',    5, 'afternoon', '16:00', '17:40'),
+('Tuesday',   1, 'morning',   '08:00', '09:40'),
+('Tuesday',   2, 'morning',   '09:55', '11:35'),
+('Tuesday',   3, 'morning',   '12:00', '13:40'),
+('Tuesday',   4, 'afternoon', '14:00', '15:40'),
+('Tuesday',   5, 'afternoon', '16:00', '17:40'),
+('Wednesday', 1, 'morning',   '08:00', '09:40'),
+('Wednesday', 2, 'morning',   '09:55', '11:35'),
+('Wednesday', 3, 'morning',   '12:00', '13:40'),
+('Wednesday', 4, 'afternoon', '14:00', '15:40'),
+('Wednesday', 5, 'afternoon', '16:00', '17:40'),
+('Thursday',  1, 'morning',   '08:00', '09:40'),
+('Thursday',  2, 'morning',   '09:55', '11:35'),
+('Thursday',  3, 'morning',   '12:00', '13:40'),
+('Thursday',  4, 'afternoon', '14:00', '15:40'),
+('Thursday',  5, 'afternoon', '16:00', '17:40'),
+('Friday',    1, 'morning',   '08:00', '09:40'),
+('Friday',    2, 'morning',   '09:55', '11:35'),
+('Friday',    3, 'morning',   '12:00', '13:40'),
+('Friday',    4, 'afternoon', '14:00', '15:40'),
+('Friday',    5, 'afternoon', '16:00', '17:40');

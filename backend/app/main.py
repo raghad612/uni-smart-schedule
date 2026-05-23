@@ -10,6 +10,7 @@ from app.api import admin
 from app.api import rooms
 from app.api import sections
 from app.api import courses
+from app.api import subjects 
 
 app = FastAPI(
     title="Smart Instructor Scheduling System",
@@ -34,6 +35,7 @@ app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(rooms.router, prefix="/rooms", tags=["rooms"])
 app.include_router(sections.router, prefix="/sections", tags=["sections"])
 app.include_router(courses.router, prefix="/courses", tags=["courses"])
+app.include_router(subjects.router, prefix="/subjects", tags=["subjects"])  
 
 @app.get("/health")
 def health_check():

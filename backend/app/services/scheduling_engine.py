@@ -5,7 +5,14 @@ from app.models.availability import Availability
 from app.models.schedule_proposal import ScheduleProposal
 from app.models.schedule_assignment import ScheduleAssignment
 from app.models.conflict_log import ConflictLog
-from app.models.enums import InstructorType, AvailabilityPreference, AvailabilityStatus
+from app.models.enums import (
+    InstructorType,
+    AvailabilityPreference,
+    AvailabilityStatus,
+    ProposalStatus,
+    AssignmentStatus,
+    WeekRotation,
+)
 
 
 # ─── FUNCTION 1 ───────────────────────────────────────────────────────────────
@@ -23,9 +30,12 @@ def load_data(db: Session, semester: str) -> tuple[list, list, list]:
 
 # ─── FUNCTION 2 ───────────────────────────────────────────────────────────────
 
-def validate_availability(instructors: list, availability: list) -> list:
+def validate_availability(instructors: list, availability: list, course_instances: list) -> list:
+    instructor_ids_with_courses = {ci.instructor_id for ci in course_instances}
     errors = []
     for instructor in instructors:
+        if instructor.id not in instructor_ids_with_courses:
+            continue
         submitted = [
             a for a in availability
             if a.instructor_id == instructor.id
@@ -260,7 +270,7 @@ def save_proposal(
 ) -> int:
     proposal = ScheduleProposal(
         semester=semester,
-        status="draft",
+        status=ProposalStatus.draft,
         created_by=created_by,
         notes=notes,
     )
@@ -273,8 +283,8 @@ def save_proposal(
             course_instance_id=a["course_instance_id"],
             slot_id=a["slot_id"],
             room_id=a.get("room_id"),
-            week_rotation="ALWAYS",
-            status="proposed",
+            week_rotation=WeekRotation.ALWAYS,
+            status=AssignmentStatus.proposed,
         )
         db.add(row)
 

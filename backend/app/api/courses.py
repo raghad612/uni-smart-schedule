@@ -8,6 +8,7 @@ from app.models.instructor import Instructor
 from app.models.section import Section
 from app.models.subject import Subject
 from app.models.user import User
+from app.models.schedule_assignment import ScheduleAssignment
 from app.schemas.courses import CourseInstanceCreate, CourseInstanceUpdate, CourseInstanceResponse
 
 router = APIRouter()
@@ -82,5 +83,13 @@ def delete_course(
     course = db.query(CourseInstance).filter(CourseInstance.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course instance not found")
+    linked = db.query(ScheduleAssignment).filter(
+        ScheduleAssignment.course_instance_id == course_id
+    ).first()
+    if linked:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a course instance that has existing schedule assignments"
+        )
     db.delete(course)
     db.commit()

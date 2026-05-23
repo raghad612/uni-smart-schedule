@@ -7,6 +7,7 @@ import InstructorPortal from './pages/InstructorPortal';
 import ConflictViewer from './pages/ConflictViewer';
 import ScheduleViewer from './pages/ScheduleViewer';
 import ProposalList from './pages/ProposalList';
+import DataManager from './pages/DataManager';
 import { isLoggedIn, getUserRole } from './utils/auth';
 
 const queryClient = new QueryClient();
@@ -47,6 +48,11 @@ export default function App() {
           <Route path="/proposals" element={
             <PrivateRoute requiredRole="ADMIN">
               <ProposalList />
+            </PrivateRoute>
+          } />
+          <Route path="/data" element={
+            <PrivateRoute requiredRole="ADMIN">
+              <DataManager />
             </PrivateRoute>
           } />
           <Route path="*" element={<Navigate to="/login" />} />
