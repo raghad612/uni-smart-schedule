@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
+import Footer from '../components/Footer';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -177,7 +178,7 @@ export default function ScheduleViewer() {
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
             System Status: Operational
           </div>
-          <div>© 2026 UniSchedule · AI-Powered Planning</div>
+          <div><Footer /></div>
         </div>
       </main>
     </div>

@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
+import Footer from '../components/Footer';
 
 export default function ProposalList() {
   const navigate = useNavigate();
@@ -114,6 +115,7 @@ export default function ProposalList() {
           ))}
         </div>
       </div>
+      <Footer />
     </div>
   );
 }

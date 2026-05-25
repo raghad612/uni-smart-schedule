@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
+import Footer from '../components/Footer';
 
 // --- CONSTANTES COHÉRENTES AVEC LA BASE DE DONNÉES (1h30 par session) ---
 const slotDetails = {
@@ -305,6 +306,7 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+      <Footer />
     </div>
   );
 }

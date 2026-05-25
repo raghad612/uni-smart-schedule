@@ -28,6 +28,16 @@ def create_instructor(
     db.refresh(instructor)
     return instructor
 
+@router.get("/me", response_model=InstructorResponse)
+def get_my_instructor_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    instructor = db.query(Instructor).filter(Instructor.user_id == current_user.id).first()
+    if not instructor:
+        raise HTTPException(status_code=404, detail="Instructor profile not found")
+    return instructor
+
 @router.get("/{instructor_id}", response_model=InstructorResponse)
 def get_instructor(
     instructor_id: int,

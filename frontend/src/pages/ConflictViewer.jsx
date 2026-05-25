@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
+import Footer from '../components/Footer';
 
 export default function ConflictViewer() {
   const { proposalId } = useParams();
@@ -169,6 +170,7 @@ export default function ConflictViewer() {
           Resolve each conflict by noting the corrective action taken, then re-run the engine if needed.
         </p>
       </div>
+      <Footer />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
+import Footer from '../components/Footer';
 
 const TABS = ['Instructors', 'Subjects', 'Sections', 'Rooms', 'Courses', 'Users'];
 
@@ -670,6 +671,7 @@ export default function DataManager() {
           {activeTab === 'Users' && <UsersTab />}
         </div>
       </div>
+      <Footer />
     </div>
   );
 }

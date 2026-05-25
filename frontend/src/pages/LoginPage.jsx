@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { saveToken, getUserRole } from '../utils/auth';
-
+import Footer from '../components/Footer';
 
 import api from '../utils/api';
 
@@ -146,9 +146,8 @@ export default function LoginPage() {
         </form>
       </div>
 
-      <p className="mt-8 text-xs text-center" style={{ color: 'rgba(255,255,255,0.2)' }}>
-        ©️ 2026 UniSchedule · University Scheduling System
-      </p>
+      <Footer />
+      
     </div>
   );
 }

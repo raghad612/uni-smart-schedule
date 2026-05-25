@@ -20,22 +20,23 @@ def submit_availability(
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor profile not found")
 
+    # Full replace: delete all existing slots for this preference/semester
+    # so submitting never accumulates old data
+    db.query(Availability).filter(
+        Availability.instructor_id == instructor.id,
+        Availability.semester == payload.semester,
+        Availability.preference == payload.preference
+    ).delete()
+
+    # Insert the new slots
     for slot_id in payload.slot_ids:
-        existing = db.query(Availability).filter(
-            Availability.instructor_id == instructor.id,
-            Availability.slot_id == slot_id,
-            Availability.semester == payload.semester
-        ).first()
-        if existing:
-            existing.preference = payload.preference
-        else:
-            entry = Availability(
-                instructor_id=instructor.id,
-                slot_id=slot_id,
-                preference=payload.preference,
-                semester=payload.semester
-            )
-            db.add(entry)
+        entry = Availability(
+            instructor_id=instructor.id,
+            slot_id=slot_id,
+            preference=payload.preference,
+            semester=payload.semester
+        )
+        db.add(entry)
 
     db.commit()
 
