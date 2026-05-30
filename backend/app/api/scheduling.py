@@ -40,16 +40,8 @@ def run_scheduling_engine(
             detail=f"No course instances found for semester '{body.semester}'"
         )
 
-    # Step 2 - validate
+    # Step 2 - validate (collect warnings, do not halt)
     validation_errors = validate_availability(instructors, availability, course_instances)
-    if validation_errors:
-        return {
-            "proposal_id": None,
-            "assignments_count": 0,
-            "conflicts_count": 0,
-            "conflicts": [],
-            "validation_errors": validation_errors,
-        }
 
     # Step 3 - sort
     sorted_instructors = sort_instructors(instructors)
@@ -90,5 +82,5 @@ def run_scheduling_engine(
         "conflicts_count": len(conflicts),
         "gap_score": gap_score,
         "conflicts": conflicts,
-        "validation_errors": [],
+        "validation_errors": validation_errors,
     }
