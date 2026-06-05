@@ -20,21 +20,69 @@ export default function TimetablePreview({
   isRejectPending,
 }) {
   const navigate = useNavigate();
-  const conflictSlotIds = new Set(conflicts.map(c => c.slot_id).filter(Boolean));
+
+  // Split conflicts into two categories:
+  // 1. no_available_slot → show in banner (these have slot_id = null, nothing to highlight)
+  // 2. instructor_double_booked / room_double_booked → highlight cells red (these have slot_id)
+  const noSlotConflicts = conflicts.filter(c => c.conflict_type === 'no_available_slot');
+  const cellConflicts = conflicts.filter(
+    c => c.conflict_type !== 'no_available_slot' && c.slot_id != null
+  );
+  const conflictSlotIds = new Set(cellConflicts.map(c => c.slot_id));
 
   return (
     <div className="lg:col-span-8">
 
-      {/* Conflict alert banner */}
-      {conflicts.length > 0 && (
-        <div className="mb-6 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between">
+      {/* ── Unscheduled Courses Banner ── */}
+      {noSlotConflicts.length > 0 && (
+        <div className="mb-4 p-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-xl">📋</span>
+            <div>
+              <h4 className="text-yellow-400 font-bold text-sm">
+                {noSlotConflicts.length} Course{noSlotConflicts.length !== 1 ? 's' : ''} Could Not Be Scheduled
+              </h4>
+              <p className="text-[10px] text-yellow-400/60 uppercase tracking-wider">
+                No available slot was found for these courses — all submitted slots were already taken
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {noSlotConflicts.map((c, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between bg-yellow-500/5 border border-yellow-500/15 rounded-xl px-3 py-2"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[11px] font-bold text-yellow-300 capitalize">
+                    {c.instructor_name || 'Unknown Instructor'}
+                  </span>
+                  <span className="text-[10px] text-white/50">
+                    {c.subject_name || 'Unknown Subject'}
+                    {c.section_label ? ` · ${c.section_label}` : ''}
+                  </span>
+                </div>
+                <span className="text-[8px] font-black text-yellow-500/50 uppercase tracking-widest">
+                  Unscheduled
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Double-booked Conflict Banner ── */}
+      {cellConflicts.length > 0 && (
+        <div className="mb-4 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <span className="text-2xl">⚠️</span>
             <div>
               <h4 className="text-red-400 font-bold text-sm">
-                Action Required: {conflicts.length} conflict{conflicts.length !== 1 ? 's' : ''} detected
+                {cellConflicts.length} Scheduling Conflict{cellConflicts.length !== 1 ? 's' : ''} Detected
               </h4>
-              <p className="text-[11px] text-red-400/60 uppercase">Resolve before approving.</p>
+              <p className="text-[10px] text-red-400/60 uppercase tracking-wider">
+                Cells highlighted in red — same instructor or room assigned twice in the same slot
+              </p>
             </div>
           </div>
           <button
@@ -42,6 +90,18 @@ export default function TimetablePreview({
             className="bg-red-500 hover:bg-red-600 text-white text-[10px] font-black px-4 py-2 rounded-lg transition-all"
           >
             VIEW LOGS
+          </button>
+        </div>
+      )}
+
+      {/* ── Combined banner when BOTH types exist ── */}
+      {noSlotConflicts.length > 0 && cellConflicts.length === 0 && (
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={() => navigate(`/conflicts/${activeProposal}`)}
+            className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 text-[10px] font-bold px-4 py-2 rounded-lg transition-all border border-yellow-500/20 uppercase tracking-wider"
+          >
+            View All Conflict Details →
           </button>
         </div>
       )}
@@ -98,19 +158,23 @@ export default function TimetablePreview({
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-sm bg-red-500/30 border border-red-500/40" />
-              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Conflict</span>
+              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Slot conflict</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-sm bg-yellow-500/20 border border-yellow-500/30" />
+              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Unscheduled course</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-sm border border-dashed border-white/10" />
-              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">No class scheduled</span>
+              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Free slot</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-sm bg-orange-500/10 border border-orange-500/20" />
-              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Morning slot</span>
+              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Morning</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-sm bg-purple-500/10 border border-purple-500/20" />
-              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Afternoon slot</span>
+              <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Afternoon</span>
             </div>
           </div>
         )}
