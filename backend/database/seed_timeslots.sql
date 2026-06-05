@@ -1,0 +1,28 @@
+docker exec -i uni-smart-schedule-db-1 psql -U schedule_user -d smart_schedule -c "
+INSERT INTO time_slots (day, slot_num, period, start_time, end_time) VALUES
+  ('Monday', 1, 'morning',   '08:00', '09:40'),
+  ('Monday', 2, 'morning',   '09:55', '11:35'),
+  ('Monday', 3, 'afternoon', '12:00', '13:40'),
+  ('Monday', 4, 'afternoon', '14:00', '15:40'),
+  ('Monday', 5, 'afternoon', '16:00', '17:40'),
+  ('Tuesday', 1, 'morning',   '08:00', '09:40'),
+  ('Tuesday', 2, 'morning',   '09:55', '11:35'),
+  ('Tuesday', 3, 'afternoon', '12:00', '13:40'),
+  ('Tuesday', 4, 'afternoon', '14:00', '15:40'),
+  ('Tuesday', 5, 'afternoon', '16:00', '17:40'),
+  ('Wednesday', 1, 'morning',   '08:00', '09:40'),
+  ('Wednesday', 2, 'morning',   '09:55', '11:35'),
+  ('Wednesday', 3, 'afternoon', '12:00', '13:40'),
+  ('Wednesday', 4, 'afternoon', '14:00', '15:40'),
+  ('Wednesday', 5, 'afternoon', '16:00', '17:40'),
+  ('Thursday', 1, 'morning',   '08:00', '09:40'),
+  ('Thursday', 2, 'morning',   '09:55', '11:35'),
+  ('Thursday', 3, 'afternoon', '12:00', '13:40'),
+  ('Thursday', 4, 'afternoon', '14:00', '15:40'),
+  ('Thursday', 5, 'afternoon', '16:00', '17:40'),
+  ('Friday', 1, 'morning',   '08:00', '09:40'),
+  ('Friday', 2, 'morning',   '09:55', '11:35'),
+  ('Friday', 3, 'afternoon', '12:00', '13:40'),
+  ('Friday', 4, 'afternoon', '14:00', '15:40'),
+  ('Friday', 5, 'afternoon', '16:00', '17:40');
+"
