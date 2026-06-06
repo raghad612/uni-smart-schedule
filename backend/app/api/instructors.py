@@ -22,6 +22,18 @@ def create_instructor(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
+    # Check the user account exists
+    if payload.user_id:
+        user = db.query(User).filter(User.id == payload.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User account not found")
+        # Check this user account isn't already linked to another instructor
+        existing = db.query(Instructor).filter(Instructor.user_id == payload.user_id).first()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"User account is already linked to instructor '{existing.name}'. Each user can only be linked to one instructor profile."
+            )
     instructor = Instructor(**payload.model_dump())
     db.add(instructor)
     db.commit()

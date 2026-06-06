@@ -1,4 +1,3 @@
-// Linked to user accounts via user_id
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -99,7 +98,12 @@ export default function InstructorsTab() {
         <Modal title={modal === 'add' ? 'Add Instructor' : 'Edit Instructor'} onClose={() => setModal(null)}>
           <div className="space-y-4">
             <FormField label="Full Name">
-              <input className={inputClass} value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Dr. John Smith" />
+              <input
+                className={inputClass}
+                value={form.name}
+                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                placeholder="Dr. John Smith"
+              />
             </FormField>
             <FormField label="Type">
               <select className={selectClass} value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
@@ -109,20 +113,36 @@ export default function InstructorsTab() {
             </FormField>
             <div className="grid grid-cols-2 gap-4">
               <FormField label="Required Sessions / Week">
-                <input type="number" className={inputClass} value={form.required_sessions}
-                  onChange={e => setForm(p => ({ ...p, required_sessions: e.target.value }))} min={1} />
+                <input
+                  type="number" className={inputClass} value={form.required_sessions}
+                  onChange={e => setForm(p => ({ ...p, required_sessions: e.target.value }))} min={1}
+                />
               </FormField>
               <FormField label="Max Sessions / Day">
-                <input type="number" className={inputClass} value={form.max_sessions_per_day}
-                  onChange={e => setForm(p => ({ ...p, max_sessions_per_day: e.target.value }))} min={1} />
+                <input
+                  type="number" className={inputClass} value={form.max_sessions_per_day}
+                  onChange={e => setForm(p => ({ ...p, max_sessions_per_day: e.target.value }))} min={1}
+                />
               </FormField>
             </div>
             <FormField label="Link to User Account (optional)">
-              <select className={selectClass} value={form.user_id} onChange={e => setForm(p => ({ ...p, user_id: e.target.value }))}>
+              <select
+                className={selectClass}
+                value={form.user_id}
+                onChange={e => setForm(p => ({ ...p, user_id: e.target.value }))}
+              >
                 <option value="">— Select user —</option>
-                {users.filter(u => u.role === 'INSTRUCTOR').map(u => (
-                  <option key={u.id} value={u.id}>{u.email}</option>
-                ))}
+                {users.filter(u => u.role === 'INSTRUCTOR').map(u => {
+                  // Grey out accounts already linked to a different instructor
+                  const alreadyLinked = instructors.some(
+                    i => i.user_id === u.id && i.id !== (modal === 'add' ? null : modal?.id)
+                  );
+                  return (
+                    <option key={u.id} value={u.id} disabled={alreadyLinked}>
+                      {u.email}{alreadyLinked ? ' (already linked)' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </FormField>
             <button

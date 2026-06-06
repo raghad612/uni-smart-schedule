@@ -191,11 +191,16 @@ def assign_slots(
             break
 
         if not assigned:
+            # Build a human-readable details message for the conflict log
+            reason = "No available slots submitted"
+            if instructor_avail:
+                reason = "All submitted slots are already taken by approved proposals or this run"
             conflicts.append({
                 "course_instance_id": ci.id,
                 "instructor_id": instructor_id,
                 "conflict_type": "no_available_slot",
                 "slot_id": None,
+                "details": f"{reason} for course instance #{ci.id} (instructor_id={instructor_id})",
             })
 
     return assignments, conflicts
@@ -308,6 +313,8 @@ def detect_conflicts(assignments: list) -> list:
             conflicts.append({
                 "slot_id": slot_id,
                 "conflict_type": "instructor_double_booked",
+                "instructor_id": instructor_id,
+                "course_instance_id": group[0]["course_instance_id"],
                 "details": f"Instructor {instructor_id} assigned {len(group)} times in slot {slot_id}",
             })
 
@@ -316,6 +323,8 @@ def detect_conflicts(assignments: list) -> list:
             conflicts.append({
                 "slot_id": slot_id,
                 "conflict_type": "room_double_booked",
+                "instructor_id": group[0]["instructor_id"],
+                "course_instance_id": group[0]["course_instance_id"],
                 "details": f"Room {room_id} assigned {len(group)} times in slot {slot_id}",
             })
 
@@ -357,6 +366,10 @@ def save_proposal(
             proposal_id=proposal.id,
             slot_id=c.get("slot_id"),
             conflict_type=c["conflict_type"],
+            # Save instructor and course instance for display in conflict viewer
+            instructor_id=c.get("instructor_id"),
+            course_instance_id=c.get("course_instance_id"),
+            details=c.get("details"),
         )
         db.add(row)
 
