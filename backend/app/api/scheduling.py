@@ -35,8 +35,19 @@ def run_scheduling_engine(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    # Extract period ("1" or "2") from full semester string ("2024-2" → "2")
+    parts = body.semester.split("-")
+    if len(parts) != 2 or parts[1] not in ("1", "2"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid semester format '{body.semester}'. Expected format: YYYY-1 or YYYY-2"
+        )
+    period = parts[1]
+
     # Step 1 - load
-    instructors, course_instances, availability = load_data(db, body.semester)
+    # semester (full) → filters availability and proposals
+    # period ("1"/"2") → filters course_instances
+    instructors, course_instances, availability = load_data(db, body.semester, period)
 
     # Filter to specific section if provided
     section_label = ""
@@ -50,21 +61,20 @@ def run_scheduling_engine(
     if not course_instances:
         raise HTTPException(
             status_code=400,
-            detail=f"No course instances found for semester '{body.semester}'"
+            detail=f"No course instances found for semester period '{period}'"
             + (f" in section '{section_label}'" if section_label else "")
         )
 
-    # Step 2 - load already-committed slots from approved proposals
-    # so the engine won't reuse a slot an instructor is already teaching in
+    # Step 2 - load committed slots from approved proposals this semester
     instructor_committed, room_committed = load_committed_slots(db, body.semester)
 
-    # Step 3 - validate (warnings only, do not halt)
+    # Step 3 - validate
     validation_errors = validate_availability(instructors, availability, course_instances)
 
     # Step 4 - sort
     sorted_instructors = sort_instructors(instructors)
 
-    # Step 5 - assign (respecting committed slots)
+    # Step 5 - assign
     assignments, assign_conflicts = assign_slots(
         sorted_instructors,
         course_instances,

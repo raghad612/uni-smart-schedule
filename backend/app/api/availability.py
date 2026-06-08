@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.core.database import get_db
 from app.core.dependencies import require_admin, require_instructor
 from app.models.availability import Availability
@@ -20,15 +20,12 @@ def submit_availability(
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor profile not found")
 
-    # Full replace: delete all existing slots for this preference/semester
-    # so submitting never accumulates old data
     db.query(Availability).filter(
         Availability.instructor_id == instructor.id,
         Availability.semester == payload.semester,
         Availability.preference == payload.preference
     ).delete()
 
-    # Insert the new slots
     for slot_id in payload.slot_ids:
         entry = Availability(
             instructor_id=instructor.id,
@@ -48,13 +45,19 @@ def submit_availability(
 
 @router.get("/me", response_model=List[AvailabilityResponse])
 def get_my_availability(
+    semester: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_instructor)
 ):
     instructor = db.query(Instructor).filter(Instructor.user_id == current_user.id).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor profile not found")
-    return db.query(Availability).filter(Availability.instructor_id == instructor.id).all()
+
+    query = db.query(Availability).filter(Availability.instructor_id == instructor.id)
+    if semester:
+        query = query.filter(Availability.semester == semester)
+
+    return query.all()
 
 
 @router.get("/{instructor_id}", response_model=List[AvailabilityResponse])

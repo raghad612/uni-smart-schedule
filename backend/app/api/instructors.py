@@ -14,7 +14,12 @@ def list_instructors(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    return db.query(Instructor).all()
+    return (
+        db.query(Instructor)
+        .join(User, Instructor.user_id == User.id)
+        .filter(Instructor.is_active == True)
+        .all()
+    )
 
 @router.post("/", response_model=InstructorResponse, status_code=201)
 def create_instructor(
@@ -22,12 +27,10 @@ def create_instructor(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    # Check the user account exists
     if payload.user_id:
         user = db.query(User).filter(User.id == payload.user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User account not found")
-        # Check this user account isn't already linked to another instructor
         existing = db.query(Instructor).filter(Instructor.user_id == payload.user_id).first()
         if existing:
             raise HTTPException(
@@ -88,7 +91,12 @@ def deactivate_instructor(
     instructor = db.query(Instructor).filter(Instructor.id == instructor_id).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor not found")
-    user = db.query(User).filter(User.id == instructor.user_id).first()
-    if user:
-        user.is_active = False
+
+    instructor.is_active = False
+
+    if instructor.user_id:
+        user = db.query(User).filter(User.id == instructor.user_id).first()
+        if user:
+            user.is_active = False
+
     db.commit()

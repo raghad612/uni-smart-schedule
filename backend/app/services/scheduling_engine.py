@@ -14,12 +14,14 @@ from app.models.enums import (
 )
 
 
-# ── FUNCTION 1 ────────────────────────────────────────────────────────────────
-
-def load_data(db: Session, semester: str) -> tuple[list, list, list]:
+def load_data(db: Session, semester: str, period: str) -> tuple[list, list, list]:
+    """
+    semester: full string e.g. "2024-2" — used to filter availability
+    period:   just "1" or "2"           — used to filter course_instances
+    """
     instructors = db.query(Instructor).all()
     course_instances = db.query(CourseInstance).filter(
-        CourseInstance.semester == semester
+        CourseInstance.semester == period
     ).all()
     availability = db.query(Availability).filter(
         Availability.semester == semester
@@ -27,16 +29,7 @@ def load_data(db: Session, semester: str) -> tuple[list, list, list]:
     return instructors, course_instances, availability
 
 
-# ── FUNCTION 1b ───────────────────────────────────────────────────────────────
-# Load slots already committed in approved proposals for this semester.
-# These slots are blocked — the same instructor or room cannot be reused.
-
 def load_committed_slots(db: Session, semester: str) -> tuple[dict, dict]:
-    """
-    Returns:
-        instructor_committed: {instructor_id: set of slot_ids already assigned}
-        room_committed:       {room_id: set of slot_ids already assigned}
-    """
     approved = db.query(ScheduleProposal).filter(
         ScheduleProposal.semester == semester,
         ScheduleProposal.status == ProposalStatus.approved,
@@ -50,7 +43,6 @@ def load_committed_slots(db: Session, semester: str) -> tuple[dict, dict]:
             ScheduleAssignment.proposal_id == proposal.id
         ).all()
         for a in assignments:
-            # Get instructor_id via course_instance
             ci = db.query(CourseInstance).filter(
                 CourseInstance.id == a.course_instance_id
             ).first()
@@ -61,8 +53,6 @@ def load_committed_slots(db: Session, semester: str) -> tuple[dict, dict]:
 
     return instructor_committed, room_committed
 
-
-# ── FUNCTION 2 ────────────────────────────────────────────────────────────────
 
 def validate_availability(
     instructors: list,
@@ -88,16 +78,12 @@ def validate_availability(
     return errors
 
 
-# ── FUNCTION 3 ────────────────────────────────────────────────────────────────
-
 def sort_instructors(instructors: list) -> list:
     def sort_key(inst):
         type_order = 0 if inst.type == InstructorType.PART_TIME else 1
         return (type_order, -inst.required_sessions)
     return sorted(instructors, key=sort_key)
 
-
-# ── FUNCTION 4 ────────────────────────────────────────────────────────────────
 
 def assign_slots(
     sorted_instructors: list,
@@ -106,10 +92,6 @@ def assign_slots(
     instructor_committed: dict = None,
     room_committed: dict = None,
 ) -> tuple[list, list]:
-    """
-    instructor_committed: slots already used in approved proposals {instructor_id: set}
-    room_committed:       slots already used in approved proposals {room_id: set}
-    """
     if instructor_committed is None:
         instructor_committed = {}
     if room_committed is None:
@@ -118,8 +100,6 @@ def assign_slots(
     assignments = []
     conflicts = []
 
-    # Tracks slots used within THIS run (not yet approved, but already assigned
-    # in this batch so we don't double-book within the same generation)
     used_instructor_slots: dict[int, set] = {}
     used_room_slots: dict[int, set] = {}
 
@@ -150,11 +130,9 @@ def assign_slots(
         room_id = ci.section.default_room_id if ci.section else None
         instructor_id = ci.instructor_id
 
-        # Slots blocked by approved proposals
         instr_blocked = instructor_committed.get(instructor_id, set())
         room_blocked = room_committed.get(room_id, set()) if room_id else set()
 
-        # Slots used so far in this run
         instr_used = used_instructor_slots.setdefault(instructor_id, set())
         room_used = used_room_slots.setdefault(room_id, set()) if room_id else set()
 
@@ -162,19 +140,15 @@ def assign_slots(
         for avail_row in candidates:
             slot_id = avail_row.slot_id
 
-            # Skip if blocked by an approved proposal
             if slot_id in instr_blocked:
                 continue
             if room_id and slot_id in room_blocked:
                 continue
-
-            # Skip if already used in this run
             if slot_id in instr_used:
                 continue
             if room_id and slot_id in room_used:
                 continue
 
-            # Assign
             instr_used.add(slot_id)
             if room_id:
                 room_used.add(slot_id)
@@ -191,7 +165,6 @@ def assign_slots(
             break
 
         if not assigned:
-            # Build a human-readable details message for the conflict log
             reason = "No available slots submitted"
             if instructor_avail:
                 reason = "All submitted slots are already taken by approved proposals or this run"
@@ -205,8 +178,6 @@ def assign_slots(
 
     return assignments, conflicts
 
-
-# ── FUNCTION 5 ────────────────────────────────────────────────────────────────
 
 def calculate_gap_score(assignments: list, time_slots: list) -> int:
     slot_info: dict[int, tuple[int, int]] = {}
@@ -231,8 +202,6 @@ def calculate_gap_score(assignments: list, time_slots: list) -> int:
 
     return total_gap
 
-
-# ── FUNCTION 6 ────────────────────────────────────────────────────────────────
 
 def optimise_gaps(assignments: list, time_slots: list) -> list:
     best = list(assignments)
@@ -288,8 +257,6 @@ def _has_conflict(assignments: list) -> bool:
     return False
 
 
-# ── FUNCTION 7 ────────────────────────────────────────────────────────────────
-
 def detect_conflicts(assignments: list) -> list:
     conflicts = []
     instructor_slots: dict[tuple, list] = {}
@@ -331,8 +298,6 @@ def detect_conflicts(assignments: list) -> list:
     return conflicts
 
 
-# ── FUNCTION 8 ────────────────────────────────────────────────────────────────
-
 def save_proposal(
     db: Session,
     assignments: list,
@@ -366,7 +331,6 @@ def save_proposal(
             proposal_id=proposal.id,
             slot_id=c.get("slot_id"),
             conflict_type=c["conflict_type"],
-            # Save instructor and course instance for display in conflict viewer
             instructor_id=c.get("instructor_id"),
             course_instance_id=c.get("course_instance_id"),
             details=c.get("details"),

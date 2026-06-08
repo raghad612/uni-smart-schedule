@@ -97,7 +97,7 @@ export default function CoursesTab() {
   });
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  const semester = `2024-${activeSemester}`;
+  const semester = activeSemester; // "1" or "2" — year-independent
 
   // Courses belonging to the selected section and semester
   const sectionCourses = allCourses.filter(

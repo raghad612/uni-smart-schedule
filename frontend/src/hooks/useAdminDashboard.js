@@ -6,7 +6,11 @@ import api from '../utils/api';
 export function useAdminDashboard() {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState('');
-  const [semester, setSemester] = useState('2024-2');
+  const [semesterYear, setSemesterYear] = useState(2024);
+  const [semesterPeriod, setSemesterPeriod] = useState('2');
+  const semester = `${semesterYear}-${semesterPeriod}`;
+  const period = semesterPeriod; // "1" or "2" — used to match course_instances.semester
+
   const [selectedSectionId, setSelectedSectionId] = useState(null);
   const [activeProposal, setActiveProposal] = useState(null);
   const [selectedInstructor, setSelectedInstructor] = useState(null);
@@ -19,22 +23,25 @@ export function useAdminDashboard() {
   });
 
   // ── Instructors ────────────────────────────────────────────────────────────
-  const { data: instructors = [], isLoading: instructorsLoading } = useQuery({
+  const { data: rawInstructors = [], isLoading: instructorsLoading } = useQuery({
     queryKey: ['instructors'],
     queryFn: () => api.get('/instructors/').then(r => r.data),
   });
 
-  // ── Course instances for selected section (to know which instructors matter)
+  const instructors = rawInstructors.filter(i => i.is_active !== false);
+
+  // ── Course instances ───────────────────────────────────────────────────────
   const { data: allCourses = [] } = useQuery({
     queryKey: ['courses'],
     queryFn: () => api.get('/courses/').then(r => r.data),
   });
 
-  // Instructor IDs that teach in the selected section this semester
+  // Instructor IDs that teach in the selected section this period
+  // course_instances.semester is now "1" or "2", so compare against period not full semester
   const relevantInstructorIds = selectedSectionId
     ? [...new Set(
         allCourses
-          .filter(ci => ci.section_id === selectedSectionId && ci.semester === semester)
+          .filter(ci => ci.section_id === selectedSectionId && ci.semester === period)
           .map(ci => ci.instructor_id)
       )]
     : instructors.map(i => i.id);
@@ -43,9 +50,10 @@ export function useAdminDashboard() {
 
   // ── Availability summary ───────────────────────────────────────────────────
   const instructorIds = instructors.map(i => i.id);
+  const instructorIdsKey = instructorIds.join(',');
 
   const { data: allAvailability = [] } = useQuery({
-    queryKey: ['all-availability', instructorIds],
+    queryKey: ['all-availability', instructorIdsKey],
     queryFn: async () => {
       const results = await Promise.all(
         instructorIds.map(id =>
@@ -63,7 +71,7 @@ export function useAdminDashboard() {
     allAvailability.map(a => [a.instructor_id, a.count > 0])
   );
 
-  // ── Auto-load latest proposal on mount ────────────────────────────────────
+  // ── Auto-load latest proposal for current semester ─────────────────────────
   const { data: proposalsList = [] } = useQuery({
     queryKey: ['proposals-list', semester],
     queryFn: () => api.get(`/proposals/?semester=${semester}`).then(r => r.data),
@@ -74,6 +82,11 @@ export function useAdminDashboard() {
       setActiveProposal(proposalsList[0].id);
     }
   }, [proposalsList]);
+
+  // Reset timetable preview when section selection changes
+  useEffect(() => {
+    setActiveProposal(null);
+  }, [selectedSectionId]);
 
   // ── Active proposal detail ─────────────────────────────────────────────────
   const { data: proposal } = useQuery({
@@ -150,7 +163,9 @@ export function useAdminDashboard() {
 
   return {
     notes, setNotes,
-    semester, setSemester,
+    semester,
+    semesterYear, setSemesterYear,
+    semesterPeriod, setSemesterPeriod,
     sections,
     selectedSectionId, setSelectedSectionId,
     activeProposal,

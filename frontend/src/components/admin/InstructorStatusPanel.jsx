@@ -9,20 +9,22 @@ export default function InstructorStatusPanel({
   onSelectInstructor,
 }) {
   return (
-    <div className="p-6 rounded-[2rem] bg-white/5 border border-white/10">
-      <div className="mb-4">
-        <h3 className="font-bold uppercase text-[11px] tracking-widest text-white/40">
-          Instructor Status
-        </h3>
-        <p className="text-[9px] text-white/20 uppercase tracking-widest mt-1">
+    <div className="px-5 sm:px-6 pb-5 sm:pb-6">
+      <div className="mb-3">
+        <p className="text-[9px] text-white/20 uppercase tracking-widest">
           Click an instructor to view their availability grid
         </p>
       </div>
 
-      <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-        {isLoading
-          ? <SkeletonRow />
-          : instructors.map(i => (
+      <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+        {isLoading ? (
+          <SkeletonRow />
+        ) : instructors.length === 0 ? (
+          <div className="text-center py-8 text-white/20 text-xs">
+            No instructors found for this section and semester.
+          </div>
+        ) : (
+          instructors.map(i => (
             <button
               key={i.id}
               onClick={() => onSelectInstructor(i)}
@@ -51,7 +53,7 @@ export default function InstructorStatusPanel({
               </div>
             </button>
           ))
-        }
+        )}
       </div>
     </div>
   );
