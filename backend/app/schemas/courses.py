@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 
@@ -9,6 +9,13 @@ class CourseInstanceCreate(BaseModel):
     parallel_group_id: Optional[int] = None
     semester: str
     session_type: str = "lecture"
+
+    @field_validator('semester')
+    @classmethod
+    def semester_must_be_period(cls, v):
+        if v not in ("1", "2"):
+            raise ValueError("semester must be '1' or '2'")
+        return v
 
 
 class CourseInstanceUpdate(BaseModel):

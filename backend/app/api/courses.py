@@ -22,7 +22,10 @@ def list_courses(
 ):
     query = db.query(CourseInstance)
     if semester:
-        query = query.filter(CourseInstance.semester == semester)
+        # Accept either "1"/"2" directly, or extract period from "2024-2" format
+        period = semester.split("-")[-1] if "-" in semester else semester
+        if period in ("1", "2"):
+            query = query.filter(CourseInstance.semester == period)
     return query.all()
 
 

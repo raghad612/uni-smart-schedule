@@ -18,28 +18,20 @@ const prefConfig = {
   NONE:      { label: 'Unset',     short: '',  color: 'rgba(255,255,255,0.12)', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.06)' },
 };
 const ORDER = ['NONE', 'AVAILABLE', 'PREFERRED', 'BUSY'];
-const SEMESTER = '2024-2';
 
-// ── My Schedule tab ──────────────────────────────────────────────────────────
-function MyScheduleTab({ instructorProfile }) {
-  const { data: proposals = [] } = useQuery({
-    queryKey: ['proposals-approved'],
-    queryFn: () => api.get(`/proposals/?semester=${SEMESTER}`).then(r => r.data),
-  });
-
-  const approvedProposal = proposals.find(p => p.status === 'approved');
-
+// ── My Schedule tab ────────────────────────────────────────────────────────
+function MyScheduleTab({ instructorProfile, semester }) {
   const { data: proposalDetail } = useQuery({
-    queryKey: ['proposal-detail', approvedProposal?.id],
-    queryFn: () => api.get(`/proposals/${approvedProposal.id}`).then(r => r.data),
-    enabled: !!approvedProposal,
+    queryKey: ['proposal-approved-detail', semester],
+    queryFn: () => api.get(`/proposals/approved?semester=${semester}`).then(r => r.data),
   });
 
+  const approvedProposal = proposalDetail;
   if (!approvedProposal) {
     return (
       <div className="flex flex-col items-center justify-center py-24 opacity-30">
         <div className="text-5xl mb-4">📅</div>
-        <p className="text-sm font-medium">No schedule has been approved yet.</p>
+        <p className="text-sm font-medium">No approved schedule for {semester}.</p>
         <p className="text-xs mt-2 text-white/40">Check back after the admin finalises the schedule.</p>
       </div>
     );
@@ -49,11 +41,10 @@ function MyScheduleTab({ instructorProfile }) {
     return <p className="text-center py-20 text-white/30 text-sm animate-pulse">Loading schedule...</p>;
   }
 
+  // Filter by instructor_id using the profile — not name string comparison
   const myAssignments = proposalDetail.assignments?.filter(
-    a => a.instructor_name?.toLowerCase() === instructorProfile?.name?.toLowerCase()
+    a => a.instructor_id === instructorProfile?.id
   ) ?? [];
-
-  const assignedSlotIds = new Set(myAssignments.map(a => a.slot_id));
 
   return (
     <div>
@@ -64,7 +55,7 @@ function MyScheduleTab({ instructorProfile }) {
           </span>
         </div>
         <span className="text-xs text-white/30">
-          {myAssignments.length} session{myAssignments.length !== 1 ? 's' : ''} assigned · Semester {SEMESTER}
+          {myAssignments.length} session{myAssignments.length !== 1 ? 's' : ''} assigned · Semester {semester}
         </span>
       </div>
 
@@ -93,7 +84,7 @@ function MyScheduleTab({ instructorProfile }) {
                       {assignment ? (
                         <div className="h-20 rounded-2xl bg-green-500/10 border-2 border-green-500/30 flex flex-col items-center justify-center p-2 text-center">
                           <span className="text-[9px] font-black text-green-400 uppercase tracking-tighter truncate w-full text-center">
-                            {assignment.subject_name}
+                            {assignment.subject_code || assignment.subject_name}
                           </span>
                           <span className="text-[8px] text-white/40 mt-1 uppercase">
                             Rm: {assignment.room_name}
@@ -116,12 +107,15 @@ function MyScheduleTab({ instructorProfile }) {
   );
 }
 
-// ── Main portal ──────────────────────────────────────────────────────────────
+// ── Main portal ────────────────────────────────────────────────────────────
 export default function InstructorPortal() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [slots, setSlots] = useState({});
   const [activeTab, setActiveTab] = useState('availability');
+  const [semesterYear, setSemesterYear] = useState(new Date().getFullYear());
+  const [semesterPeriod, setSemesterPeriod] = useState('2');
+  const semester = `${semesterYear}-${semesterPeriod}`;
 
   const { data: instructorProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['instructor-profile'],
@@ -129,9 +123,10 @@ export default function InstructorPortal() {
     retry: false,
   });
 
+  // Reload availability grid when semester changes
   const { isLoading: availLoading } = useQuery({
-    queryKey: ['availability'],
-    queryFn: () => api.get('/availability/me').then(r => {
+    queryKey: ['availability', semester],
+    queryFn: () => api.get(`/availability/me?semester=${semester}`).then(r => {
       const map = {};
       r.data.forEach(s => { map[s.slot_id] = s.preference; });
       setSlots(map);
@@ -146,18 +141,18 @@ export default function InstructorPortal() {
       const busy = payload.filter(s => s.preference === 'BUSY').map(s => s.slot_id);
 
       const calls = [];
-      if (preferred.length) calls.push(api.post('/availability/', { slot_ids: preferred, preference: 'PREFERRED', semester: SEMESTER }));
-      if (available.length) calls.push(api.post('/availability/', { slot_ids: available, preference: 'AVAILABLE', semester: SEMESTER }));
-      if (busy.length) calls.push(api.post('/availability/', { slot_ids: busy, preference: 'BUSY', semester: SEMESTER }));
-      if (!preferred.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'PREFERRED', semester: SEMESTER }));
-      if (!available.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'AVAILABLE', semester: SEMESTER }));
-      if (!busy.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'BUSY', semester: SEMESTER }));
+      if (preferred.length) calls.push(api.post('/availability/', { slot_ids: preferred, preference: 'PREFERRED', semester }));
+      if (available.length) calls.push(api.post('/availability/', { slot_ids: available, preference: 'AVAILABLE', semester }));
+      if (busy.length) calls.push(api.post('/availability/', { slot_ids: busy, preference: 'BUSY', semester }));
+      if (!preferred.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'PREFERRED', semester }));
+      if (!available.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'AVAILABLE', semester }));
+      if (!busy.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'BUSY', semester }));
 
       return Promise.all(calls);
     },
     onSuccess: () => {
       toast.success('Availability saved! Admin can now schedule your classes.');
-      queryClient.invalidateQueries(['availability']);
+      queryClient.invalidateQueries({ queryKey: ['availability', semester] });
     },
     onError: (err) => {
       toast.error(err.response?.data?.detail || 'Submission failed.');
@@ -235,6 +230,35 @@ export default function InstructorPortal() {
 
       <main className="max-w-6xl mx-auto px-6 py-10">
 
+        {/* Semester selector */}
+        <div className="flex items-center gap-3 mb-8 p-4 rounded-2xl bg-white/5 border border-white/10 w-fit">
+          <span className="text-[10px] font-black uppercase tracking-widest text-white/30">Semester</span>
+          <input
+            type="number"
+            value={semesterYear}
+            onChange={e => setSemesterYear(parseInt(e.target.value) || new Date().getFullYear())}
+            min={2020}
+            max={2099}
+            className="w-20 bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-sm text-white text-center outline-none focus:border-blue-500"
+          />
+          <div className="flex gap-1 bg-black/20 p-1 rounded-lg border border-white/10">
+            {['1', '2'].map(p => (
+              <button
+                key={p}
+                onClick={() => setSemesterPeriod(p)}
+                className={`px-3 py-1 rounded-md text-xs font-black uppercase transition-all ${
+                  semesterPeriod === p
+                    ? 'bg-blue-600 text-white'
+                    : 'text-white/30 hover:text-white'
+                }`}
+              >
+                S{p}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-white/40 font-bold">{semester}</span>
+        </div>
+
         {/* Tabs */}
         <div className="flex gap-2 mb-8 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit">
           <button
@@ -266,7 +290,7 @@ export default function InstructorPortal() {
               <div>
                 <h1 className="text-3xl font-bold mb-2">Availability Grid</h1>
                 <p className="text-white/40 text-sm">Click each cell to cycle through your preference. Submit when done.</p>
-                <p className="text-white/20 text-xs mt-1">Semester: {SEMESTER}</p>
+                <p className="text-white/20 text-xs mt-1">Semester: {semester}</p>
                 {requiredSessions && (
                   <p className="text-xs mt-2">
                     <span className={`font-bold ${availableCount >= requiredSessions ? 'text-green-400' : 'text-orange-400'}`}>
@@ -351,9 +375,8 @@ export default function InstructorPortal() {
           </>
         )}
 
-        {/* My Schedule tab */}
         {activeTab === 'schedule' && (
-          <MyScheduleTab instructorProfile={instructorProfile} />
+          <MyScheduleTab instructorProfile={instructorProfile} semester={semester} />
         )}
       </main>
       <Footer />
