@@ -87,8 +87,14 @@ def run_scheduling_engine(
     time_slots = db.query(TimeSlot).all()
     gap_score = calculate_gap_score(assignments, time_slots)
 
-    # Step 7 - optimise
-    assignments = optimise_gaps(assignments, time_slots)
+    # Step 7 - optimise (safely - never moves an instructor outside their availability)
+    assignments = optimise_gaps(
+        assignments,
+        time_slots,
+        availability,
+        instructor_committed=instructor_committed,
+        room_committed=room_committed,
+    )
 
     # Step 8 - detect conflicts
     conflicts = detect_conflicts(assignments)

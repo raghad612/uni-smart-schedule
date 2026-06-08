@@ -203,7 +203,24 @@ def calculate_gap_score(assignments: list, time_slots: list) -> int:
     return total_gap
 
 
-def optimise_gaps(assignments: list, time_slots: list) -> list:
+def optimise_gaps(
+    assignments: list,
+    time_slots: list,
+    availability: list,
+    instructor_committed: dict = None,
+    room_committed: dict = None,
+) -> list:
+    if instructor_committed is None:
+        instructor_committed = {}
+    if room_committed is None:
+        room_committed = {}
+
+    # Build: instructor_id -> set of slot_ids they actually offered (not BUSY)
+    avail_slots_by_instructor: dict[int, set] = {}
+    for a in availability:
+        if a.preference != AvailabilityPreference.BUSY:
+            avail_slots_by_instructor.setdefault(a.instructor_id, set()).add(a.slot_id)
+
     best = list(assignments)
     best_score = calculate_gap_score(best, time_slots)
 
@@ -215,11 +232,22 @@ def optimise_gaps(assignments: list, time_slots: list) -> list:
                 if best[i]["instructor_id"] == best[j]["instructor_id"]:
                     continue
 
-                candidate = list(best)
-                candidate[i] = {**best[i], "slot_id": best[j]["slot_id"]}
-                candidate[j] = {**best[j], "slot_id": best[i]["slot_id"]}
+                new_i_slot = best[j]["slot_id"]
+                new_j_slot = best[i]["slot_id"]
 
-                if _has_conflict(candidate):
+                # SAFETY GUARD: each instructor must actually be available for the
+                # slot they would receive - never optimise someone into a slot they
+                # did not submit (or marked BUSY).
+                if new_i_slot not in avail_slots_by_instructor.get(best[i]["instructor_id"], set()):
+                    continue
+                if new_j_slot not in avail_slots_by_instructor.get(best[j]["instructor_id"], set()):
+                    continue
+
+                candidate = list(best)
+                candidate[i] = {**best[i], "slot_id": new_i_slot}
+                candidate[j] = {**best[j], "slot_id": new_j_slot}
+
+                if _has_conflict(candidate, instructor_committed, room_committed):
                     continue
 
                 score = calculate_gap_score(candidate, time_slots)
@@ -234,7 +262,14 @@ def optimise_gaps(assignments: list, time_slots: list) -> list:
     return best
 
 
-def _has_conflict(assignments: list) -> bool:
+def _has_conflict(
+    assignments: list,
+    instructor_committed: dict = None,
+    room_committed: dict = None,
+) -> bool:
+    instructor_committed = instructor_committed or {}
+    room_committed = room_committed or {}
+
     instructor_slots: dict[int, set] = {}
     room_slots: dict[int, set] = {}
 
@@ -247,12 +282,16 @@ def _has_conflict(assignments: list) -> bool:
         if slot_id in instructor_slots.setdefault(instr, set()):
             return True
         instructor_slots[instr].add(slot_id)
+        if slot_id in instructor_committed.get(instr, set()):
+            return True
 
         room = a.get("room_id")
         if room:
             if slot_id in room_slots.setdefault(room, set()):
                 return True
             room_slots[room].add(slot_id)
+            if slot_id in room_committed.get(room, set()):
+                return True
 
     return False
 
