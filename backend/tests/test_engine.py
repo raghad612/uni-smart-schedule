@@ -3,8 +3,7 @@ from app.services.scheduling_engine import (
     sort_instructors,
     detect_conflicts,
 )
-from app.models.enums import InstructorType
-
+from app.models.enums import InstructorType, AvailabilityPreference
 
 # ─── MOCK CLASSES ─────────────────────────────────────────────────────────────
 
@@ -135,3 +134,102 @@ def test_no_conflict_different_slots():
     conflicts = detect_conflicts(assignments)
     assert len(conflicts) == 0
     
+
+# ─── TEST 4: OPTIMISER SAFETY GUARD ──────────────────────────────────────────
+# Lock in the fix: the gap optimiser must NEVER move an instructor into a slot
+# they did not offer (or marked BUSY), and never onto a committed slot.
+
+from app.services.scheduling_engine import optimise_gaps
+
+
+class MockAvailability:
+    def __init__(self, instructor_id, slot_id, preference):
+        self.instructor_id = instructor_id
+        self.slot_id = slot_id
+        self.preference = preference
+
+
+def _five_monday_slots():
+    return [MockTimeSlot(s, "Monday", s) for s in range(1, 6)]
+
+
+def test_optimiser_reduces_gap_when_both_available():
+    """A beneficial swap fully within availability IS taken."""
+    time_slots = _five_monday_slots()
+    assignments = [
+        {"instructor_id": 1, "slot_id": 1, "course_instance_id": 10, "room_id": None},
+        {"instructor_id": 1, "slot_id": 5, "course_instance_id": 11, "room_id": None},
+        {"instructor_id": 2, "slot_id": 2, "course_instance_id": 20, "room_id": None},
+    ]
+    availability = [
+        MockAvailability(1, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 5, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 5, AvailabilityPreference.AVAILABLE),
+    ]
+    before = calculate_gap_score(assignments, time_slots)
+    result = optimise_gaps(assignments, time_slots, availability)
+    assert calculate_gap_score(result, time_slots) < before
+
+
+def test_optimiser_never_moves_instructor_outside_availability():
+    """A beneficial swap is REJECTED if the receiving instructor never offered that slot."""
+    time_slots = _five_monday_slots()
+    assignments = [
+        {"instructor_id": 1, "slot_id": 1, "course_instance_id": 10, "room_id": None},
+        {"instructor_id": 1, "slot_id": 5, "course_instance_id": 11, "room_id": None},
+        {"instructor_id": 2, "slot_id": 2, "course_instance_id": 20, "room_id": None},
+    ]
+    availability = [
+        MockAvailability(1, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 5, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 2, AvailabilityPreference.AVAILABLE),
+    ]
+    result = optimise_gaps(assignments, time_slots, availability)
+    instr2_slot = [a for a in result if a["instructor_id"] == 2][0]["slot_id"]
+    assert instr2_slot == 2
+
+
+def test_optimiser_ignores_busy_slots():
+    """A slot marked BUSY must not be used by the optimiser."""
+    time_slots = _five_monday_slots()
+    assignments = [
+        {"instructor_id": 1, "slot_id": 1, "course_instance_id": 10, "room_id": None},
+        {"instructor_id": 1, "slot_id": 5, "course_instance_id": 11, "room_id": None},
+        {"instructor_id": 2, "slot_id": 2, "course_instance_id": 20, "room_id": None},
+    ]
+    availability = [
+        MockAvailability(1, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 5, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 5, AvailabilityPreference.BUSY),
+    ]
+    result = optimise_gaps(assignments, time_slots, availability)
+    instr2_slot = [a for a in result if a["instructor_id"] == 2][0]["slot_id"]
+    assert instr2_slot == 2
+
+
+def test_optimiser_respects_committed_slots():
+    """A swap must be rejected if it collides with an approved proposal's committed slot."""
+    time_slots = _five_monday_slots()
+    assignments = [
+        {"instructor_id": 1, "slot_id": 1, "course_instance_id": 10, "room_id": None},
+        {"instructor_id": 1, "slot_id": 5, "course_instance_id": 11, "room_id": None},
+        {"instructor_id": 2, "slot_id": 2, "course_instance_id": 20, "room_id": None},
+    ]
+    availability = [
+        MockAvailability(1, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(1, 5, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailability(2, 5, AvailabilityPreference.AVAILABLE),
+    ]
+    result = optimise_gaps(
+        assignments, time_slots, availability,
+        instructor_committed={2: {5}},
+    )
+    instr2_slot = [a for a in result if a["instructor_id"] == 2][0]["slot_id"]
+    assert instr2_slot == 2
