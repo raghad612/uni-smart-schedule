@@ -64,8 +64,9 @@ function MyScheduleTab({ instructorProfile, semester }) {
           <p className="text-sm">No sessions assigned to you in the approved schedule.</p>
         </div>
       ) : (
-        <div className="bg-[#0a1628] border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
-          <div className="grid grid-cols-[140px_1fr_1fr_1fr_1fr_1fr] gap-4">
+        <div className="bg-[#0a1628] border border-white/10 rounded-[2.5rem] p-4 sm:p-8 shadow-2xl">
+          <div className="overflow-x-auto">
+          <div className="grid grid-cols-[110px_repeat(5,minmax(90px,1fr))] sm:grid-cols-[140px_1fr_1fr_1fr_1fr_1fr] gap-3 sm:gap-4 min-w-[640px]">
             <div />
             {days.map(d => (
               <div key={d} className="text-center text-[10px] font-black uppercase tracking-[0.2em] opacity-20 mb-4">{d}</div>
@@ -100,6 +101,7 @@ function MyScheduleTab({ instructorProfile, semester }) {
                 })}
               </div>
             ))}
+          </div>
           </div>
         </div>
       )}
@@ -323,8 +325,9 @@ export default function InstructorPortal() {
               </div>
             </div>
 
-            <div className="bg-[#0a1628] border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
-              <div className="grid grid-cols-[140px_1fr_1fr_1fr_1fr_1fr] gap-4">
+            <div className="bg-[#0a1628] border border-white/10 rounded-[2.5rem] p-4 sm:p-8 shadow-2xl">
+              <div className="overflow-x-auto">
+              <div className="grid grid-cols-[110px_repeat(5,minmax(90px,1fr))] sm:grid-cols-[140px_1fr_1fr_1fr_1fr_1fr] gap-3 sm:gap-4 min-w-[640px]">
                 <div />
                 {days.map(d => (
                   <div key={d} className="text-center text-[10px] font-black uppercase tracking-[0.2em] opacity-20 mb-4">{d}</div>
@@ -357,6 +360,7 @@ export default function InstructorPortal() {
                     })}
                   </div>
                 ))}
+              </div>
               </div>
             </div>
 
