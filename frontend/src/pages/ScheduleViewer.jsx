@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
+import AdminNavbar from '../components/admin/AdminNavbar';
 import Footer from '../components/Footer';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -138,6 +139,8 @@ export default function ScheduleViewer() {
   return (
     <div className="min-h-screen bg-[#070d1a] text-white font-sans print:bg-white print:text-black">
 
+                <AdminNavbar />
+
       <style>{`
         @media print {
           @page {
@@ -197,9 +200,7 @@ export default function ScheduleViewer() {
           <button onClick={() => navigate(`/conflicts/${proposalId}`)} className="text-xs bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-4 py-2 rounded-xl font-bold transition-all">
             ⚠ Conflicts ({proposal?.conflicts?.length || 0})
           </button>
-          <button onClick={() => navigate('/proposals')} className="text-xs font-black uppercase tracking-widest text-blue-400 hover:text-white transition-colors">History</button>
-          <button onClick={() => navigate('/admin')} className="text-xs font-black uppercase tracking-widest text-blue-400 hover:text-white transition-colors">Dashboard</button>
-          <button onClick={() => { removeToken(); navigate('/login'); }} className="text-xs bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2 rounded-xl hover:bg-red-500 hover:text-white transition-all font-bold">Sign out</button>
+          
         </div>
       </nav>
 

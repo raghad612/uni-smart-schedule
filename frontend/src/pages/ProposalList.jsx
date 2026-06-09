@@ -2,8 +2,8 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
-import { removeToken } from '../utils/auth';
 import Footer from '../components/Footer';
+import AdminNavbar from '../components/admin/AdminNavbar';
 
 export default function ProposalList() {
   const navigate = useNavigate();
@@ -38,10 +38,7 @@ export default function ProposalList() {
     },
   });
 
-  const handleLogout = () => {
-    removeToken();
-    navigate('/login');
-  };
+
 
   const statusStyle = (status) => {
     if (status === 'approved') return { bg: 'rgba(52,211,153,0.1)', color: '#34d399' };
@@ -51,34 +48,7 @@ export default function ProposalList() {
 
   return (
     <div className="min-h-screen" style={{ background: '#070d1a', color: 'white' }}>
-      <nav
-        className="flex items-center justify-between px-6 py-4"
-        style={{ background: '#0a1628', borderBottom: '1px solid rgba(255,255,255,0.07)' }}
-      >
-        <div className="flex items-center gap-3">
-          <span
-            className="text-white font-semibold text-sm cursor-pointer"
-            onClick={() => navigate('/admin')}
-          >
-            UniSchedule
-          </span>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{ background: 'rgba(96,165,250,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }}
-          >
-            History
-          </span>
-        </div>
-        <div className="flex gap-4">
-          <button onClick={() => navigate('/admin')} className="text-xs text-white/50 hover:text-white transition-colors">
-            Dashboard
-          </button>
-          <button onClick={handleLogout} className="text-xs text-red-400/70 hover:text-red-400 transition-colors">
-            Sign out
-          </button>
-        </div>
-      </nav>
-
+      <AdminNavbar />
       <div className="max-w-5xl mx-auto px-6 py-10">
         <div className="flex justify-between items-end mb-10">
           <div>

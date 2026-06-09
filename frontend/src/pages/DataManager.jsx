@@ -1,8 +1,7 @@
 // Each tab is an independent component in components/data/
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { removeToken } from '../utils/auth';
+import AdminNavbar from '../components/admin/AdminNavbar';
 import Footer from '../components/Footer';
 import InstructorsTab from '../components/data/InstructorsTab';
 import SubjectsTab from '../components/data/SubjectsTab';
@@ -14,38 +13,11 @@ import UsersTab from '../components/data/UsersTab';
 const TABS = ['Instructors', 'Subjects', 'Sections', 'Rooms', 'Courses', 'Users'];
 
 export default function DataManager() {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('Instructors');
 
   return (
     <div className="min-h-screen bg-[#070d1a] text-white">
-      <nav className="flex items-center justify-between px-6 py-4 bg-[#0a1628] border-b border-white/5">
-        <div className="flex items-center gap-3">
-          <span
-            className="text-white font-semibold text-sm cursor-pointer"
-            onClick={() => navigate('/admin')}
-          >
-            UniSchedule
-          </span>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{ background: 'rgba(96,165,250,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }}
-          >
-            Data Manager
-          </span>
-        </div>
-        <div className="flex gap-4">
-          <button onClick={() => navigate('/admin')} className="text-xs text-white/50 hover:text-white transition-colors">
-            Dashboard
-          </button>
-          <button
-            onClick={() => { removeToken(); navigate('/login'); }}
-            className="text-xs text-red-400/70 hover:text-red-400 transition-colors"
-          >
-            Sign out
-          </button>
-        </div>
-      </nav>
+     <AdminNavbar />
 
       <div className="max-w-5xl mx-auto px-6 py-10">
         <div className="mb-8">

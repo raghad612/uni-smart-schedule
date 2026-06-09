@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { removeToken } from '../utils/auth';
+// import { removeToken } from '../utils/auth';
 import { useAdminDashboard } from '../hooks/useAdminDashboard';
 import AdminNavbar from '../components/admin/AdminNavbar';
 import StatCard from '../components/admin/StatCard';
@@ -39,7 +39,7 @@ export default function AdminDashboard() {
     rejectMutation,
   } = useAdminDashboard();
 
-  const handleLogout = () => { removeToken(); navigate('/login'); };
+  // const handleLogout = () => { removeToken(); navigate('/login'); };
   const selectedSection = sections.find(s => s.id === selectedSectionId);
 
   const sortedSections = sections
@@ -48,7 +48,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-[#070d1a] text-white">
-      <AdminNavbar onLogout={handleLogout} />
+      <AdminNavbar  />
 
       {selectedInstructor && (
         <AvailabilityModal

@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import Footer from '../components/Footer';
+import AdminNavbar from '../components/admin/AdminNavbar';
 
 // Human-readable conflict type labels
 const CONFLICT_LABELS = {
@@ -78,15 +79,11 @@ export default function ConflictViewer() {
 
   return (
     <div className="min-h-screen bg-[#070d1a] text-white p-8">
+       <AdminNavbar />
 
       {/* Header */}
       <div className="max-w-4xl mx-auto mb-10">
-        <button
-          onClick={() => navigate('/proposals')}
-          className="text-xs text-blue-400 mb-4 block hover:underline"
-        >
-          ← Back to Proposal List
-        </button>
+        
         <div className="flex justify-between items-end">
           <div>
             <h1 className="text-3xl font-black">Conflict Report</h1>
