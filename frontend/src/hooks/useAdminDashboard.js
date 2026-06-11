@@ -6,12 +6,39 @@ import api from '../utils/api';
 export function useAdminDashboard() {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState('');
-  const [semesterYear, setSemesterYear] = useState(2024);
-  const [semesterPeriod, setSemesterPeriod] = useState('2');
-  const semester = `${semesterYear}-${semesterPeriod}`;
-  const period = semesterPeriod; // "1" or "2" — used to match course_instances.semester
 
-  const [selectedSectionId, setSelectedSectionId] = useState(null);
+  // ── Persist semester + section across navigation ───────────────────────────
+  const [semesterYear, setSemesterYear] = useState(() => {
+    const saved = sessionStorage.getItem('dash_semesterYear');
+    return saved ? parseInt(saved) : 2024;
+  });
+  const [semesterPeriod, setSemesterPeriod] = useState(() => {
+    return sessionStorage.getItem('dash_semesterPeriod') || '2';
+  });
+  const [selectedSectionId, setSelectedSectionId] = useState(() => {
+    const saved = sessionStorage.getItem('dash_sectionId');
+    return saved ? parseInt(saved) : null;
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem('dash_semesterYear', semesterYear);
+  }, [semesterYear]);
+
+  useEffect(() => {
+    sessionStorage.setItem('dash_semesterPeriod', semesterPeriod);
+  }, [semesterPeriod]);
+
+  useEffect(() => {
+    if (selectedSectionId === null) {
+      sessionStorage.removeItem('dash_sectionId');
+    } else {
+      sessionStorage.setItem('dash_sectionId', selectedSectionId);
+    }
+  }, [selectedSectionId]);
+
+  const semester = `${semesterYear}-${semesterPeriod}`;
+  const period = semesterPeriod;
+
   const [activeProposal, setActiveProposal] = useState(null);
   const [selectedInstructor, setSelectedInstructor] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,8 +63,6 @@ export function useAdminDashboard() {
     queryFn: () => api.get('/courses/').then(r => r.data),
   });
 
-  // Instructor IDs that teach in the selected section this period
-  // course_instances.semester is now "1" or "2", so compare against period not full semester
   const relevantInstructorIds = selectedSectionId
     ? [...new Set(
         allCourses
@@ -78,15 +103,12 @@ export function useAdminDashboard() {
   });
 
   useEffect(() => {
-    if (proposalsList.length > 0 && activeProposal === null) {
+    if (proposalsList.length > 0) {
       setActiveProposal(proposalsList[0].id);
+    } else {
+      setActiveProposal(null);
     }
   }, [proposalsList]);
-
-  // Reset timetable preview when section selection changes
-  useEffect(() => {
-    setActiveProposal(null);
-  }, [selectedSectionId]);
 
   // ── Active proposal detail ─────────────────────────────────────────────────
   const { data: proposal } = useQuery({
