@@ -44,10 +44,8 @@ CREATE TABLE instructors (
     user_id              INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name                 VARCHAR(255) NOT NULL,
     type                 instructor_type NOT NULL DEFAULT 'FULL_TIME',
-    max_sessions_per_day INTEGER NOT NULL DEFAULT 2,
-    required_sessions    INTEGER NOT NULL DEFAULT 10
+    is_active            BOOLEAN NOT NULL DEFAULT TRUE
 );
-
 -- ============================================================
 -- TABLE 3: rooms
 -- ============================================================

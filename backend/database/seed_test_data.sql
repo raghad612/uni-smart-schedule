@@ -18,7 +18,7 @@ ON CONFLICT DO NOTHING;
 
 -- ─── UPDATE EXISTING FULL-TIME INSTRUCTOR ────────────────────────────────────
 UPDATE instructors
-SET type = 'FULL_TIME', max_sessions_per_day = 3, required_sessions = 3
+SET type = 'FULL_TIME'
 WHERE user_id = 5;
 
 -- ─── PART-TIME INSTRUCTOR ────────────────────────────────────────────────────
@@ -26,8 +26,8 @@ INSERT INTO users (email, password_hash, role, is_active, created_at) VALUES
   ('parttime@test.com', '$2b$12$KIXvWmFakeHashForSeedDataOnly1234567890abcde', 'INSTRUCTOR', true, NOW())
 ON CONFLICT DO NOTHING;
 
-INSERT INTO instructors (user_id, name, type, max_sessions_per_day, required_sessions)
-SELECT id, 'Dr. Part Timer', 'PART_TIME', 2, 2
+INSERT INTO instructors (user_id, name, type)
+SELECT id, 'Dr. Part Timer', 'PART_TIME'
 FROM users WHERE email = 'parttime@test.com'
 ON CONFLICT DO NOTHING;
 

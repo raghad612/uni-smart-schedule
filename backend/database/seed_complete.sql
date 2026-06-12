@@ -31,13 +31,13 @@ INSERT INTO subjects (code, name, credits, sessions_per_week) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- ─── INSTRUCTORS ─────────────────────────────────────────────────────────────
-INSERT INTO instructors (user_id, name, type, max_sessions_per_day, required_sessions)
-SELECT id, 'Dr. Full Time', 'FULL_TIME', 3, 4
+INSERT INTO instructors (user_id, name, type)
+SELECT id, 'Dr. Full Time', 'FULL_TIME'
 FROM users WHERE email = 'fulltime@test.com'
 ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO instructors (user_id, name, type, max_sessions_per_day, required_sessions)
-SELECT id, 'Dr. Part Time', 'PART_TIME', 2, 2
+INSERT INTO instructors (user_id, name, type)
+SELECT id, 'Dr. Part Time', 'PART_TIME'
 FROM users WHERE email = 'parttime@test.com'
 ON CONFLICT (user_id) DO NOTHING;
 
