@@ -8,10 +8,20 @@ from app.models.enums import InstructorType, AvailabilityPreference
 # ─── MOCK CLASSES ─────────────────────────────────────────────────────────────
 
 class MockInstructor:
-    def __init__(self, id, type, required_sessions):
+    def __init__(self, id, type):
         self.id = id
         self.type = type
-        self.required_sessions = required_sessions
+
+
+class MockSubject:
+    def __init__(self, sessions_per_week):
+        self.sessions_per_week = sessions_per_week
+
+
+class MockCourseInstance:
+    def __init__(self, instructor_id, sessions_per_week):
+        self.instructor_id = instructor_id
+        self.subject = MockSubject(sessions_per_week)
 
 
 class MockTimeSlot:
@@ -72,12 +82,18 @@ def test_gap_score_single_session_per_day():
 def test_sort_part_time_before_full_time():
     """PART_TIME instructors must come before FULL_TIME."""
     instructors = [
-        MockInstructor(1, InstructorType.FULL_TIME, 4),
-        MockInstructor(2, InstructorType.PART_TIME, 2),
-        MockInstructor(3, InstructorType.FULL_TIME, 3),
-        MockInstructor(4, InstructorType.PART_TIME, 3),
+        MockInstructor(1, InstructorType.FULL_TIME),
+        MockInstructor(2, InstructorType.PART_TIME),
+        MockInstructor(3, InstructorType.FULL_TIME),
+        MockInstructor(4, InstructorType.PART_TIME),
     ]
-    result = sort_instructors(instructors)
+    course_instances = [
+        MockCourseInstance(1, 4),
+        MockCourseInstance(2, 2),
+        MockCourseInstance(3, 3),
+        MockCourseInstance(4, 3),
+    ]
+    result = sort_instructors(instructors, course_instances)
     types = [i.type for i in result]
     part_time_indices = [i for i, t in enumerate(types) if t == InstructorType.PART_TIME]
     full_time_indices = [i for i, t in enumerate(types) if t == InstructorType.FULL_TIME]
@@ -85,20 +101,45 @@ def test_sort_part_time_before_full_time():
 
 
 def test_sort_within_group_by_required_sessions_desc():
-    """Within each type group, more required_sessions comes first."""
+    """Within each type group, more required_sessions (derived from courses) comes first."""
     instructors = [
-        MockInstructor(1, InstructorType.PART_TIME, 2),
-        MockInstructor(2, InstructorType.PART_TIME, 4),
-        MockInstructor(3, InstructorType.FULL_TIME, 3),
-        MockInstructor(4, InstructorType.FULL_TIME, 5),
+        MockInstructor(1, InstructorType.PART_TIME),
+        MockInstructor(2, InstructorType.PART_TIME),
+        MockInstructor(3, InstructorType.FULL_TIME),
+        MockInstructor(4, InstructorType.FULL_TIME),
     ]
-    result = sort_instructors(instructors)
+    course_instances = [
+        MockCourseInstance(1, 2),
+        MockCourseInstance(2, 4),
+        MockCourseInstance(3, 3),
+        MockCourseInstance(4, 5),
+    ]
+    result = sort_instructors(instructors, course_instances)
     # First two should be PART_TIME with id=2 (4 sessions) before id=1 (2 sessions)
     assert result[0].id == 2
     assert result[1].id == 1
     # Last two should be FULL_TIME with id=4 (5 sessions) before id=3 (3 sessions)
     assert result[2].id == 4
     assert result[3].id == 3
+
+
+def test_sort_with_fractional_sessions_per_week():
+    """A 3.5 sessions/week course rounds UP to 4 when computing required sessions."""
+    instructors = [
+        MockInstructor(1, InstructorType.PART_TIME),
+        MockInstructor(2, InstructorType.PART_TIME),
+    ]
+    # Instructor 1: one course at 3.5 -> ceil(3.5) = 4
+    # Instructor 2: two courses, 2 + 1.5 -> ceil(3.5) = 4 as well, but
+    # combined with a third small course -> 4.5 -> ceil = 5, so instructor 2 wins
+    course_instances = [
+        MockCourseInstance(1, 3.5),
+        MockCourseInstance(2, 2),
+        MockCourseInstance(2, 2.5),
+    ]
+    result = sort_instructors(instructors, course_instances)
+    assert result[0].id == 2
+    assert result[1].id == 1
 
 
 # ─── TEST 3: CONFLICT DETECTION ───────────────────────────────────────────────

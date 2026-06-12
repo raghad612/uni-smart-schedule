@@ -72,7 +72,7 @@ def run_scheduling_engine(
     validation_errors = validate_availability(instructors, availability, course_instances)
 
     # Step 4 - sort
-    sorted_instructors = sort_instructors(instructors)
+    sorted_instructors = sort_instructors(instructors, course_instances)
 
     # Step 5 - assign
     assignments, assign_conflicts = assign_slots(

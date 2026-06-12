@@ -1,3 +1,5 @@
+import math
+
 from sqlalchemy.orm import Session
 from app.models.instructor import Instructor
 from app.models.course_instance import CourseInstance
@@ -54,23 +56,48 @@ def load_committed_slots(db: Session, semester: str) -> tuple[dict, dict]:
     return instructor_committed, room_committed
 
 
+def compute_required_sessions(course_instances: list) -> dict[int, int]:
+    """
+    Derives each instructor's required sessions/week from the courses they
+    teach this semester, instead of a manually-entered field.
+
+    For each course_instance, adds its subject's sessions_per_week (a float,
+    e.g. 3.5 for a course that meets 3 times every week + 1 time every other
+    week) to that instructor's running total. The totals are then rounded UP
+    (ceil) — a 3.5 total becomes 4, because the instructor still needs a
+    reserved slot every week for the biweekly session (it alternates
+    WEEK_A/WEEK_B in the same time slot).
+
+    Returns: {instructor_id: required_sessions_per_week (int)}
+    """
+    totals: dict[int, float] = {}
+    for ci in course_instances:
+        subject = ci.subject
+        if subject is None:
+            continue
+        totals[ci.instructor_id] = totals.get(ci.instructor_id, 0.0) + subject.sessions_per_week
+    return {instructor_id: math.ceil(total) for instructor_id, total in totals.items()}
+
+
 def validate_availability(
     instructors: list,
     availability: list,
     course_instances: list,
 ) -> list:
-    instructor_ids_with_courses = {ci.instructor_id for ci in course_instances}
+    required_sessions = compute_required_sessions(course_instances)
     errors = []
     for instructor in instructors:
-        if instructor.id not in instructor_ids_with_courses:
+        required = required_sessions.get(instructor.id)
+        if required is None:
+            # Instructor has no course_instances this semester — nothing to validate
             continue
         submitted = [
             a for a in availability
             if a.instructor_id == instructor.id
             and a.preference != AvailabilityPreference.BUSY
         ]
-        if len(submitted) < instructor.required_sessions:
-            missing = instructor.required_sessions - len(submitted)
+        if len(submitted) < required:
+            missing = required - len(submitted)
             errors.append({
                 "instructor_id": instructor.id,
                 "issue": f"missing {missing} slots"
@@ -78,10 +105,12 @@ def validate_availability(
     return errors
 
 
-def sort_instructors(instructors: list) -> list:
+def sort_instructors(instructors: list, course_instances: list) -> list:
+    required_sessions = compute_required_sessions(course_instances)
+
     def sort_key(inst):
         type_order = 0 if inst.type == InstructorType.PART_TIME else 1
-        return (type_order, -inst.required_sessions)
+        return (type_order, -required_sessions.get(inst.id, 0))
     return sorted(instructors, key=sort_key)
 
 
