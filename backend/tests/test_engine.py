@@ -2,9 +2,10 @@ from app.services.scheduling_engine import (
     calculate_gap_score,
     sort_instructors,
     detect_conflicts,
+    _rotations_overlap,
+    _has_conflict,
 )
-from app.models.enums import InstructorType, AvailabilityPreference
-
+from app.models.enums import InstructorType, AvailabilityPreference, WeekRotation
 # ─── MOCK CLASSES ─────────────────────────────────────────────────────────────
 
 class MockInstructor:
@@ -274,3 +275,80 @@ def test_optimiser_respects_committed_slots():
     )
     instr2_slot = [a for a in result if a["instructor_id"] == 2][0]["slot_id"]
     assert instr2_slot == 2
+
+    # ─── TEST 5: WEEK_A / WEEK_B ROTATION OVERLAP ────────────────────────────────
+# These cover the "alternating week" course case: a course meeting every
+# other week (WEEK_A or WEEK_B) should NOT clash with a different course's
+# session in the same slot/room if that other course alternates on the
+# OPPOSITE week. ALWAYS (every-week) sessions clash with everything.
+
+def test_rotations_overlap_always_clashes_with_anything():
+    assert _rotations_overlap(WeekRotation.ALWAYS, WeekRotation.ALWAYS) is True
+    assert _rotations_overlap(WeekRotation.ALWAYS, WeekRotation.WEEK_A) is True
+    assert _rotations_overlap(WeekRotation.WEEK_B, WeekRotation.ALWAYS) is True
+
+
+def test_rotations_overlap_same_alternating_week_clashes():
+    assert _rotations_overlap(WeekRotation.WEEK_A, WeekRotation.WEEK_A) is True
+    assert _rotations_overlap(WeekRotation.WEEK_B, WeekRotation.WEEK_B) is True
+
+
+def test_rotations_overlap_opposite_alternating_weeks_do_not_clash():
+    assert _rotations_overlap(WeekRotation.WEEK_A, WeekRotation.WEEK_B) is False
+    assert _rotations_overlap(WeekRotation.WEEK_B, WeekRotation.WEEK_A) is False
+
+
+def test_detect_conflicts_week_a_and_week_b_same_slot_same_room_no_conflict():
+    """Two different courses, same instructor's slot/room, but one runs on
+    WEEK_A and the other on WEEK_B -> they never actually happen together."""
+    assignments = [
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 10, "room_id": 5, "week_rotation": WeekRotation.WEEK_A},
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 11, "room_id": 5, "week_rotation": WeekRotation.WEEK_B},
+    ]
+    assert detect_conflicts(assignments) == []
+    assert _has_conflict(assignments) is False
+
+
+def test_detect_conflicts_two_week_a_sessions_same_slot_is_conflict():
+    """Two different courses both on WEEK_A in the same instructor slot
+    -> they DO happen on the same real weeks -> conflict."""
+    assignments = [
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 10, "room_id": 5, "week_rotation": WeekRotation.WEEK_A},
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 11, "room_id": 6, "week_rotation": WeekRotation.WEEK_A},
+    ]
+    conflicts = detect_conflicts(assignments)
+    assert any(c["conflict_type"] == "instructor_double_booked" for c in conflicts)
+    assert _has_conflict(assignments) is True
+
+
+def test_detect_conflicts_always_clashes_with_week_a():
+    """An ALWAYS (every-week) session clashes with a WEEK_A session in the
+    same slot, because the ALWAYS one happens on A-weeks too."""
+    assignments = [
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 10, "room_id": 5, "week_rotation": WeekRotation.ALWAYS},
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 11, "room_id": 6, "week_rotation": WeekRotation.WEEK_A},
+    ]
+    conflicts = detect_conflicts(assignments)
+    assert any(c["conflict_type"] == "instructor_double_booked" for c in conflicts)
+    assert _has_conflict(assignments) is True
+
+
+def test_detect_conflicts_missing_week_rotation_defaults_to_always():
+    """Assignments without a 'week_rotation' key (legacy/pre-Step-B engine
+    output) are treated as ALWAYS, preserving old behavior."""
+    assignments = [
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 10, "room_id": 5},
+        {"instructor_id": 1, "slot_id": 3, "course_instance_id": 11, "room_id": 6},
+    ]
+    conflicts = detect_conflicts(assignments)
+    assert any(c["conflict_type"] == "instructor_double_booked" for c in conflicts)
+
+
+def test_room_double_booking_week_a_week_b_no_conflict():
+    """Same room/slot, different instructors, opposite alternating weeks
+    -> no room conflict."""
+    assignments = [
+        {"instructor_id": 1, "slot_id": 2, "course_instance_id": 10, "room_id": 5, "week_rotation": WeekRotation.WEEK_A},
+        {"instructor_id": 2, "slot_id": 2, "course_instance_id": 11, "room_id": 5, "week_rotation": WeekRotation.WEEK_B},
+    ]
+    assert detect_conflicts(assignments) == []

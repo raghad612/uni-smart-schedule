@@ -291,6 +291,43 @@ def optimise_gaps(
     return best
 
 
+def _rotations_overlap(rotation_a, rotation_b) -> bool:
+    """
+    Returns True if two assignments with these week_rotation values could
+    ever land on the same real-world week (i.e. would actually clash).
+
+    - ALWAYS happens every week, so it clashes with anything in the same slot.
+    - WEEK_A only clashes with ALWAYS or another WEEK_A.
+    - WEEK_B only clashes with ALWAYS or another WEEK_B.
+    - WEEK_A and WEEK_B never clash with each other - they alternate, so the
+      same slot/room/instructor can be shared by one WEEK_A course and one
+      WEEK_B course.
+    """
+    if rotation_a == WeekRotation.ALWAYS or rotation_b == WeekRotation.ALWAYS:
+        return True
+    return rotation_a == rotation_b
+
+
+def _find_overlapping(group: list) -> list:
+    """
+    Given a list of assignments that all share the same slot (and same
+    instructor, or same room), returns the subset that actually clash with
+    at least one other entry once week_rotation is taken into account.
+    Assignments without a "week_rotation" key are treated as ALWAYS.
+    """
+    overlapping = []
+    for i, a in enumerate(group):
+        rotation_a = a.get("week_rotation", WeekRotation.ALWAYS)
+        for j, b in enumerate(group):
+            if i == j:
+                continue
+            rotation_b = b.get("week_rotation", WeekRotation.ALWAYS)
+            if _rotations_overlap(rotation_a, rotation_b):
+                overlapping.append(a)
+                break
+    return overlapping
+
+
 def _has_conflict(
     assignments: list,
     instructor_committed: dict = None,
@@ -299,26 +336,35 @@ def _has_conflict(
     instructor_committed = instructor_committed or {}
     room_committed = room_committed or {}
 
-    instructor_slots: dict[int, set] = {}
-    room_slots: dict[int, set] = {}
+    instructor_slots: dict[tuple, list] = {}
+    room_slots: dict[tuple, list] = {}
 
     for a in assignments:
         slot_id = a["slot_id"]
         if slot_id is None:
             continue
+        rotation = a.get("week_rotation", WeekRotation.ALWAYS)
 
         instr = a["instructor_id"]
-        if slot_id in instructor_slots.setdefault(instr, set()):
-            return True
-        instructor_slots[instr].add(slot_id)
+        instr_key = (instr, slot_id)
+        for existing_rotation in instructor_slots.setdefault(instr_key, []):
+            if _rotations_overlap(existing_rotation, rotation):
+                return True
+        instructor_slots[instr_key].append(rotation)
+
+        # Approved-schedule slots remain conservatively blocked regardless of
+        # rotation (see Q4 - not yet rotation-aware).
         if slot_id in instructor_committed.get(instr, set()):
             return True
 
         room = a.get("room_id")
         if room:
-            if slot_id in room_slots.setdefault(room, set()):
-                return True
-            room_slots[room].add(slot_id)
+            room_key = (room, slot_id)
+            for existing_rotation in room_slots.setdefault(room_key, []):
+                if _rotations_overlap(existing_rotation, rotation):
+                    return True
+            room_slots[room_key].append(rotation)
+
             if slot_id in room_committed.get(room, set()):
                 return True
 
@@ -344,27 +390,28 @@ def detect_conflicts(assignments: list) -> list:
             room_slots.setdefault(room_key, []).append(a)
 
     for (instructor_id, slot_id), group in instructor_slots.items():
-        if len(group) > 1:
+        clashing = _find_overlapping(group)
+        if clashing:
             conflicts.append({
                 "slot_id": slot_id,
                 "conflict_type": "instructor_double_booked",
                 "instructor_id": instructor_id,
-                "course_instance_id": group[0]["course_instance_id"],
-                "details": f"Instructor {instructor_id} assigned {len(group)} times in slot {slot_id}",
+                "course_instance_id": clashing[0]["course_instance_id"],
+                "details": f"Instructor {instructor_id} has {len(clashing)} overlapping sessions in slot {slot_id}",
             })
 
     for (room_id, slot_id), group in room_slots.items():
-        if len(group) > 1:
+        clashing = _find_overlapping(group)
+        if clashing:
             conflicts.append({
                 "slot_id": slot_id,
                 "conflict_type": "room_double_booked",
-                "instructor_id": group[0]["instructor_id"],
-                "course_instance_id": group[0]["course_instance_id"],
-                "details": f"Room {room_id} assigned {len(group)} times in slot {slot_id}",
+                "instructor_id": clashing[0]["instructor_id"],
+                "course_instance_id": clashing[0]["course_instance_id"],
+                "details": f"Room {room_id} has {len(clashing)} overlapping sessions in slot {slot_id}",
             })
 
     return conflicts
-
 
 def save_proposal(
     db: Session,
