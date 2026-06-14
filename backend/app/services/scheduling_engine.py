@@ -129,8 +129,9 @@ def assign_slots(
     assignments = []
     conflicts = []
 
-    used_instructor_slots: dict[int, set] = {}
-    used_room_slots: dict[int, set] = {}
+    # used_instructor_slots[instructor_id][slot_id] = list of rotations already placed there
+    used_instructor_slots: dict[int, dict[int, list]] = {}
+    used_room_slots: dict[int, dict[int, list]] = {}
 
     instructor_order = {inst.id: idx for idx, inst in enumerate(sorted_instructors)}
     sorted_instances = sorted(
@@ -142,6 +143,17 @@ def assign_slots(
     for a in availability:
         if a.preference != AvailabilityPreference.BUSY:
             avail_by_instructor.setdefault(a.instructor_id, []).append(a)
+
+    def slot_is_free(used_map, key, slot_id, rotation, committed_map, committed_key):
+        for existing_rotation in used_map.get(key, {}).get(slot_id, []):
+            if _rotations_overlap(existing_rotation, rotation):
+                return False
+        if committed_key is not None and slot_id in committed_map.get(committed_key, set()):
+            return False
+        return True
+
+    def mark_used(used_map, key, slot_id, rotation):
+        used_map.setdefault(key, {}).setdefault(slot_id, []).append(rotation)
 
     for ci in sorted_instances:
         instructor_avail = avail_by_instructor.get(ci.instructor_id, [])
@@ -159,50 +171,70 @@ def assign_slots(
         room_id = ci.section.default_room_id if ci.section else None
         instructor_id = ci.instructor_id
 
-        instr_blocked = instructor_committed.get(instructor_id, set())
-        room_blocked = room_committed.get(room_id, set()) if room_id else set()
+        # How many sessions/week does this course_instance need?
+        # e.g. 2.0 -> 2 fixed (ALWAYS) sessions.
+        # 3.5 -> 3 fixed (ALWAYS) sessions + 1 alternating (WEEK_A/WEEK_B) session.
+        sessions_per_week = ci.subject.sessions_per_week if ci.subject else 1.0
+        fixed_sessions = int(sessions_per_week)
+        has_alternating = (sessions_per_week - fixed_sessions) > 1e-9
+        sessions_needed = fixed_sessions + (1 if has_alternating else 0)
 
-        instr_used = used_instructor_slots.setdefault(instructor_id, set())
-        room_used = used_room_slots.setdefault(room_id, set()) if room_id else set()
+        used_slot_ids_this_ci: set = set()
+        placed = 0
 
-        assigned = False
-        for avail_row in candidates:
-            slot_id = avail_row.slot_id
+        def try_place(rotation):
+            nonlocal placed
+            for avail_row in candidates:
+                slot_id = avail_row.slot_id
+                if slot_id in used_slot_ids_this_ci:
+                    continue
+                if not slot_is_free(used_instructor_slots, instructor_id, slot_id, rotation, instructor_committed, instructor_id):
+                    continue
+                if room_id and not slot_is_free(used_room_slots, room_id, slot_id, rotation, room_committed, room_id):
+                    continue
 
-            if slot_id in instr_blocked:
-                continue
-            if room_id and slot_id in room_blocked:
-                continue
-            if slot_id in instr_used:
-                continue
-            if room_id and slot_id in room_used:
-                continue
+                mark_used(used_instructor_slots, instructor_id, slot_id, rotation)
+                if room_id:
+                    mark_used(used_room_slots, room_id, slot_id, rotation)
+                used_slot_ids_this_ci.add(slot_id)
 
-            instr_used.add(slot_id)
-            if room_id:
-                room_used.add(slot_id)
-                used_room_slots[room_id] = room_used
+                assignments.append({
+                    "course_instance_id": ci.id,
+                    "slot_id": slot_id,
+                    "room_id": room_id,
+                    "instructor_id": instructor_id,
+                    "avail_id": avail_row.id,
+                    "week_rotation": rotation,
+                })
+                placed += 1
+                return True
+            return False
 
-            assignments.append({
-                "course_instance_id": ci.id,
-                "slot_id": slot_id,
-                "room_id": room_id,
-                "instructor_id": instructor_id,
-                "avail_id": avail_row.id,
-            })
-            assigned = True
-            break
+        # Place the fixed (every-week) sessions first.
+        for _ in range(fixed_sessions):
+            try_place(WeekRotation.ALWAYS)
 
-        if not assigned:
-            reason = "No available slots submitted"
-            if instructor_avail:
-                reason = "All submitted slots are already taken by approved proposals or this run"
+        # Place the alternating session, if this course has one - try
+        # WEEK_A first, fall back to WEEK_B (lets a different alternating
+        # course share the same slot/room on the opposite week).
+        if has_alternating:
+            if not try_place(WeekRotation.WEEK_A):
+                try_place(WeekRotation.WEEK_B)
+
+        if placed < sessions_needed:
+            missing = sessions_needed - placed
+            course_label = ci.subject.code if ci.subject else f"course_instance #{ci.id}"
             conflicts.append({
                 "course_instance_id": ci.id,
                 "instructor_id": instructor_id,
-                "conflict_type": "no_available_slot",
+                "conflict_type": "incomplete_assignment",
                 "slot_id": None,
-                "details": f"{reason} for course instance #{ci.id} (instructor_id={instructor_id})",
+                "details": (
+                    f"{course_label} needs {sessions_needed} session(s)/week, "
+                    f"but only {placed} could be scheduled ({missing} missing) "
+                    f"for instructor_id={instructor_id}. Assign the remaining "
+                    f"session(s) manually."
+                ),
             })
 
     return assignments, conflicts
@@ -436,7 +468,7 @@ def save_proposal(
             course_instance_id=a["course_instance_id"],
             slot_id=a["slot_id"],
             room_id=a.get("room_id"),
-            week_rotation=WeekRotation.ALWAYS,
+            week_rotation=a.get("week_rotation", WeekRotation.ALWAYS),
             status=AssignmentStatus.proposed,
         )
         db.add(row)
