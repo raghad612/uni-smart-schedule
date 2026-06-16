@@ -118,13 +118,19 @@ def assign_slots(
     sorted_instructors: list,
     course_instances: list,
     availability: list,
+    time_slots: list = None,
     instructor_committed: dict = None,
     room_committed: dict = None,
+    max_sessions_per_day: int = 2,
 ) -> tuple[list, list]:
     if instructor_committed is None:
         instructor_committed = {}
     if room_committed is None:
         room_committed = {}
+    if time_slots is None:
+        time_slots = []
+
+    slot_day: dict[int, str] = {ts.id: ts.day for ts in time_slots}
 
     assignments = []
     conflicts = []
@@ -180,14 +186,31 @@ def assign_slots(
         sessions_needed = fixed_sessions + (1 if has_alternating else 0)
 
         used_slot_ids_this_ci: set = set()
+        used_days_this_ci: dict[str, int] = {}
         placed = 0
 
-        def try_place(rotation):
+        def try_place(rotation, allow_repeat_day):
+            """
+            Tries to place one session. If allow_repeat_day is False, only
+            considers days this course hasn't used yet this week (spreads
+            sessions across different days). If True, also allows a day
+            already used, as long as it hasn't hit max_sessions_per_day yet
+            (fallback when there aren't enough distinct days available).
+            """
             nonlocal placed
             for avail_row in candidates:
                 slot_id = avail_row.slot_id
                 if slot_id in used_slot_ids_this_ci:
                     continue
+
+                day = slot_day.get(slot_id)
+                day_count = used_days_this_ci.get(day, 0) if day is not None else 0
+                if day is not None:
+                    if day_count >= max_sessions_per_day:
+                        continue
+                    if not allow_repeat_day and day_count > 0:
+                        continue
+
                 if not slot_is_free(used_instructor_slots, instructor_id, slot_id, rotation, instructor_committed, instructor_id):
                     continue
                 if room_id and not slot_is_free(used_room_slots, room_id, slot_id, rotation, room_committed, room_id):
@@ -197,6 +220,8 @@ def assign_slots(
                 if room_id:
                     mark_used(used_room_slots, room_id, slot_id, rotation)
                 used_slot_ids_this_ci.add(slot_id)
+                if day is not None:
+                    used_days_this_ci[day] = day_count + 1
 
                 assignments.append({
                     "course_instance_id": ci.id,
@@ -210,16 +235,24 @@ def assign_slots(
                 return True
             return False
 
-        # Place the fixed (every-week) sessions first.
+        # Place the fixed (every-week) sessions first - spread across
+        # different days where possible (Pass 1), falling back to a
+        # second session on the same day only if no fresh day is
+        # available (Pass 2), and never exceeding max_sessions_per_day.
         for _ in range(fixed_sessions):
-            try_place(WeekRotation.ALWAYS)
+            if not try_place(WeekRotation.ALWAYS, allow_repeat_day=False):
+                try_place(WeekRotation.ALWAYS, allow_repeat_day=True)
 
         # Place the alternating session, if this course has one - try
         # WEEK_A first, fall back to WEEK_B (lets a different alternating
-        # course share the same slot/room on the opposite week).
+        # course share the same slot/room on the opposite week). Also
+        # subject to the same day-spread rule as the fixed sessions.
         if has_alternating:
-            if not try_place(WeekRotation.WEEK_A):
-                try_place(WeekRotation.WEEK_B)
+            placed_alt = try_place(WeekRotation.WEEK_A, allow_repeat_day=False) or \
+                         try_place(WeekRotation.WEEK_A, allow_repeat_day=True)
+            if not placed_alt:
+                try_place(WeekRotation.WEEK_B, allow_repeat_day=False) or \
+                    try_place(WeekRotation.WEEK_B, allow_repeat_day=True)
 
         if placed < sessions_needed:
             missing = sessions_needed - placed
@@ -231,12 +264,10 @@ def assign_slots(
                 "slot_id": None,
                 "details": (
                     f"{course_label} needs {sessions_needed} session(s)/week, "
-                    f"but only {placed} could be scheduled ({missing} missing) "
-                    f"for instructor_id={instructor_id}. Assign the remaining "
-                    f"session(s) manually."
+                    f"but only {placed} could be scheduled ({missing} missing). "
+                    f"Assign the remaining session(s) manually."
                 ),
             })
-
     return assignments, conflicts
 
 

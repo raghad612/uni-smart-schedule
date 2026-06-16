@@ -521,3 +521,113 @@ def test_assign_slots_default_sessions_per_week_one_when_no_subject():
     assert len(ci_assignments) == 1
     assert ci_assignments[0]["week_rotation"] == WeekRotation.ALWAYS
     assert conflicts == []
+
+# ─── TEST 7: ASSIGN_SLOTS - DAY SPREAD (MAX 2 SESSIONS/DAY PER COURSE) ───────
+
+def test_assign_slots_spreads_sessions_across_days_when_possible():
+    """A course needing 4 sessions/week, with available slots heavily
+    skewed toward one day (3 on Friday) plus other days - the engine
+    should prefer spreading across days rather than stacking 3 on Friday."""
+    time_slots = [
+        MockTimeSlot(18, "Thursday", 3),
+        MockTimeSlot(21, "Friday", 1),
+        MockTimeSlot(22, "Friday", 2),
+        MockTimeSlot(23, "Friday", 3),
+        MockTimeSlot(7, "Tuesday", 2),
+    ]
+    instructors = [MockInstructor(19, InstructorType.FULL_TIME)]
+    course_instances = [MockCourseInstance(instructor_id=19, sessions_per_week=4.0, id=90, code="IN1107")]
+    availability = [
+        MockAvailabilityRow(1, 19, 18, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 19, 21, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 19, 22, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(4, 19, 23, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(5, 19, 7, AvailabilityPreference.AVAILABLE),
+    ]
+    assignments, conflicts = assign_slots(instructors, course_instances, availability, time_slots=time_slots)
+
+    ci_assignments = [a for a in assignments if a["course_instance_id"] == 90]
+    assert len(ci_assignments) == 4
+
+    day_by_slot = {ts.id: ts.day for ts in time_slots}
+    day_counts = {}
+    for a in ci_assignments:
+        day = day_by_slot[a["slot_id"]]
+        day_counts[day] = day_counts.get(day, 0) + 1
+
+    # No single day should have more than 2 sessions for this course.
+    assert all(count <= 2 for count in day_counts.values())
+    # All 3 distinct days should have been used (Thursday, Tuesday, and
+    # Friday only gets a 2nd session as a fallback once others are used).
+    assert len(day_counts) == 3
+    assert conflicts == []
+
+
+def test_assign_slots_never_exceeds_max_two_per_day_even_if_incomplete():
+    """If only ONE day's slots are available, a course needing 3 sessions
+    can only get 2 placed (the day cap), and the 3rd is reported missing -
+    never silently stacks 3 on the same day."""
+    time_slots = [
+        MockTimeSlot(21, "Friday", 1),
+        MockTimeSlot(22, "Friday", 2),
+        MockTimeSlot(23, "Friday", 3),
+    ]
+    instructors = [MockInstructor(19, InstructorType.FULL_TIME)]
+    course_instances = [MockCourseInstance(instructor_id=19, sessions_per_week=3.0, id=91, code="IN_ONEDAY")]
+    availability = [
+        MockAvailabilityRow(1, 19, 21, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 19, 22, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 19, 23, AvailabilityPreference.AVAILABLE),
+    ]
+    assignments, conflicts = assign_slots(instructors, course_instances, availability, time_slots=time_slots)
+
+    ci_assignments = [a for a in assignments if a["course_instance_id"] == 91]
+    assert len(ci_assignments) == 2  # capped at max_sessions_per_day=2
+
+    incomplete = [c for c in conflicts if c["conflict_type"] == "incomplete_assignment"]
+    assert len(incomplete) == 1
+    assert "1 missing" in incomplete[0]["details"]
+
+
+def test_assign_slots_respects_custom_max_sessions_per_day():
+    """max_sessions_per_day is configurable - setting it to 1 means a
+    course never gets 2 sessions on the same day even if that's the only
+    way to fit them all (the rest become 'missing')."""
+    time_slots = [
+        MockTimeSlot(1, "Monday", 1),
+        MockTimeSlot(2, "Monday", 2),
+        MockTimeSlot(6, "Tuesday", 1),
+    ]
+    instructors = [MockInstructor(1, InstructorType.FULL_TIME)]
+    course_instances = [MockCourseInstance(instructor_id=1, sessions_per_week=2.0, id=92, code="IN_STRICT")]
+    availability = [
+        MockAvailabilityRow(1, 1, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 1, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 1, 6, AvailabilityPreference.AVAILABLE),
+    ]
+    assignments, conflicts = assign_slots(
+        instructors, course_instances, availability,
+        time_slots=time_slots, max_sessions_per_day=1,
+    )
+    ci_assignments = [a for a in assignments if a["course_instance_id"] == 92]
+    day_by_slot = {ts.id: ts.day for ts in time_slots}
+    days_used = [day_by_slot[a["slot_id"]] for a in ci_assignments]
+    assert len(days_used) == len(set(days_used))  # no day repeated
+    assert len(ci_assignments) == 2  # Monday slot 1 + Tuesday slot 6 - fits without repeating a day
+    assert conflicts == []
+
+
+def test_assign_slots_without_time_slots_param_is_backward_compatible():
+    """Omitting time_slots (legacy callers / existing tests) disables
+    day-spread checking entirely - falls back to old 'any free slot' logic."""
+    instructors = [MockInstructor(1, InstructorType.FULL_TIME)]
+    course_instances = [MockCourseInstance(instructor_id=1, sessions_per_week=3.0, id=93, code="IN_LEGACY")]
+    availability = [
+        MockAvailabilityRow(1, 1, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 1, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 1, 3, AvailabilityPreference.AVAILABLE),
+    ]
+    assignments, conflicts = assign_slots(instructors, course_instances, availability)
+    ci_assignments = [a for a in assignments if a["course_instance_id"] == 93]
+    assert len(ci_assignments) == 3
+    assert conflicts == []

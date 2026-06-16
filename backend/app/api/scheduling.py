@@ -68,6 +68,10 @@ def run_scheduling_engine(
     # Step 2 - load committed slots from approved proposals this semester
     instructor_committed, room_committed = load_committed_slots(db, body.semester)
 
+    # Step 2b - time slots, needed for gap scoring AND for the assignment
+    # step's day-spread logic (max 2 sessions/day per course)
+    time_slots = db.query(TimeSlot).all()
+
     # Step 3 - validate
     validation_errors = validate_availability(instructors, availability, course_instances)
 
@@ -79,12 +83,12 @@ def run_scheduling_engine(
         sorted_instructors,
         course_instances,
         availability,
+        time_slots=time_slots,
         instructor_committed=instructor_committed,
         room_committed=room_committed,
     )
 
     # Step 6 - gap score
-    time_slots = db.query(TimeSlot).all()
     gap_score = calculate_gap_score(assignments, time_slots)
 
     # Step 7 - optimise (safely - never moves an instructor outside their availability)
