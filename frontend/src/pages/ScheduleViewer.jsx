@@ -381,13 +381,15 @@ export default function ScheduleViewer() {
             </table>
           </div>
         </div>
-
-        <div className="mt-8 flex justify-between items-center text-[10px] text-white/20 uppercase font-black tracking-[0.2em] print:hidden">
+       <div className="mt-8 grid grid-cols-3 items-center text-[10px] text-white/20 uppercase font-black tracking-[0.2em] print:hidden">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
             System Status: Operational
           </div>
-          <Footer />
+          <div className="flex justify-center">
+            <Footer />
+          </div>
+          <div />
         </div>
       </main>
     </div>
