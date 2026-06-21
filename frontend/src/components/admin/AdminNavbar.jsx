@@ -17,8 +17,7 @@ export default function AdminNavbar() {
   };
 
   return (
-    <nav className="flex items-center justify-between px-4 sm:px-6 py-3 bg-[#0a1628] border-b border-white/5">
-
+<nav className="flex items-center justify-between px-4 sm:px-6 py-3 bg-[#0a1628] border-b border-white/5 print:hidden">
       {/* Left — LU logo + app name */}
       <div className="flex items-center gap-3 flex-shrink-0">
         <img
