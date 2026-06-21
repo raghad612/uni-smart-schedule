@@ -49,10 +49,10 @@ export function useAdminDashboard() {
     queryFn: () => api.get('/sections/').then(r => r.data),
   });
 
-  // ── Instructors ────────────────────────────────────────────────────────────
+// ── Instructors ────────────────────────────────────────────────────────────
   const { data: rawInstructors = [], isLoading: instructorsLoading } = useQuery({
-    queryKey: ['instructors'],
-    queryFn: () => api.get('/instructors/').then(r => r.data),
+    queryKey: ['instructors', period],
+    queryFn: () => api.get(`/instructors/?period=${period}`).then(r => r.data),
   });
 
   const instructors = rawInstructors.filter(i => i.is_active !== false);
