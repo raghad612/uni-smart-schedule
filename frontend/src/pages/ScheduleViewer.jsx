@@ -67,14 +67,18 @@ export default function ScheduleViewer() {
     (proposal?.conflicts || []).map(c => c.slot_id).filter(Boolean)
   );
 
-  const getAssignment = (slotId) => {
-    const a = proposal?.assignments?.find(x => x.slot_id === slotId);
-    if (!a) return null;
-    if (filter && !a.instructor_name?.toLowerCase().includes(filter.toLowerCase()) &&
-                 !a.subject_name?.toLowerCase().includes(filter.toLowerCase())) {
-      return { ...a, faded: true };
+const getAssignments = (slotId) => {
+    const all = (proposal?.assignments || []).filter(x => x.slot_id === slotId);
+    if (all.length === 0 || !filter) return { items: all, faded: false };
+
+    const matches = (a) =>
+      a.instructor_name?.toLowerCase().includes(filter.toLowerCase()) ||
+      a.subject_name?.toLowerCase().includes(filter.toLowerCase());
+
+    if (all.some(matches)) {
+      return { items: all.filter(matches), faded: false };
     }
-    return a;
+    return { items: all, faded: true };
   };
 
   const handleCellClick = (slotId, assignment) => {
@@ -297,62 +301,89 @@ export default function ScheduleViewer() {
                       </div>
                     </td>
 
-                    {days.map((_, di) => {
+                   {days.map((_, di) => {
                       const slotId = di * 5 + slot;
-                      const a = getAssignment(slotId);
-                      const isSelected = selectedAssignment?.slot_id === slotId;
+                      const { items, faded } = getAssignments(slotId);
                       const hasConflict = conflictSlotIds.has(slotId);
-                      const isTarget = !!selectedAssignment && !isSelected;
+                      const isTarget = !!selectedAssignment && items.length === 0;
 
                       return (
-                        <td key={di} className="min-w-[180px] print:min-w-0 print:border print:border-gray-300">
-                          {a && !a.faded ? (
-                            <div
-                              onClick={() => handleCellClick(slotId, a)}
-                              className={`p-4 rounded-[2rem] transition-all duration-300 border cursor-pointer select-none print:rounded-none print:border-0 print:p-1 print:cursor-default ${
-                                isSelected
-                                  ? 'bg-yellow-500/20 border-yellow-500/60 shadow-lg shadow-yellow-500/20 scale-105'
-                                  : hasConflict
-                                  ? 'bg-red-500/10 border-red-500/30 hover:border-red-500/60'
-                                  : isApproved
-                                  ? 'bg-white/[0.03] border-white/10 cursor-default'
-                                  : 'bg-white/[0.03] border-white/10 hover:border-blue-500/40 hover:bg-blue-500/[0.04]'
-                              }`}
-                            >
-                              <div className="flex justify-between items-start mb-2 print:hidden">
-                                <span className="text-[9px] font-black bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-lg uppercase border border-blue-500/20">
-                                  {a.room_name || '–'}
-                                </span>
-                                {hasConflict && <span className="text-xs">⚠️</span>}
-                                {isSelected && <span className="text-xs">✋</span>}
-                              </div>
+                        <td key={di} className="min-w-[180px] align-top print:min-w-0 print:border print:border-gray-300">
+                          {items.length > 0 && !faded ? (
+                            <div className="space-y-2 print:space-y-0">
+                              {items.map((a) => {
+                                const isSelected = selectedAssignment?.id === a.id;
+                                const rotation = a.week_rotation;
+                                const showBadge = rotation === 'WEEK_A' || rotation === 'WEEK_B';
+                                return (
+                                  <div
+                                    key={a.id}
+                                    onClick={() => handleCellClick(slotId, a)}
+                                    className={`p-4 rounded-[2rem] transition-all duration-300 border cursor-pointer select-none print:rounded-none print:border-0 print:p-1 print:cursor-default ${
+                                      isSelected
+                                        ? 'bg-yellow-500/20 border-yellow-500/60 shadow-lg shadow-yellow-500/20 scale-105'
+                                        : hasConflict
+                                        ? 'bg-red-500/10 border-red-500/30 hover:border-red-500/60'
+                                        : isApproved
+                                        ? 'bg-white/[0.03] border-white/10 cursor-default'
+                                        : 'bg-white/[0.03] border-white/10 hover:border-blue-500/40 hover:bg-blue-500/[0.04]'
+                                    }`}
+                                  >
+                                    <div className="flex justify-between items-start mb-2 print:hidden">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[9px] font-black bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-lg uppercase border border-blue-500/20">
+                                          {a.room_name || '–'}
+                                        </span>
+                                        {showBadge && (
+                                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg uppercase border ${
+                                            rotation === 'WEEK_A'
+                                              ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                                              : 'bg-pink-500/20 text-pink-300 border-pink-500/30'
+                                          }`}>
+                                            {rotation === 'WEEK_A' ? 'Week A' : 'Week B'}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        {hasConflict && <span className="text-xs">⚠️</span>}
+                                        {isSelected && <span className="text-xs">✋</span>}
+                                      </div>
+                                    </div>
 
-                              {/* Screen view */}
-                              <div className="text-[11px] font-black text-white mb-1 uppercase leading-tight tracking-tight line-clamp-2 print:hidden">
-                                {a.subject_name}
-                              </div>
-                              <div className="text-[10px] text-white/40 font-bold italic capitalize print:hidden">
-                                {a.instructor_name}
-                              </div>
+                                    {/* Screen view */}
+                                    <div className="text-[11px] font-black text-white mb-1 uppercase leading-tight tracking-tight line-clamp-2 print:hidden">
+                                      {a.subject_name}
+                                    </div>
+                                    <div className="text-[10px] text-white/40 font-bold italic capitalize print:hidden">
+                                      {a.instructor_name}
+                                    </div>
 
-                              {/* Print view */}
-                              <div className="hidden print:block text-[8px] font-black text-black uppercase tracking-tight">
-                                {a.subject_code || a.subject_name}
-                              </div>
-                              <div className="hidden print:block text-[8px] text-black capitalize mt-0.5">
-                                {a.instructor_name}
-                              </div>
-                              <div className="hidden print:block text-[7px] text-gray-500 mt-0.5">
-                                {a.room_name || ''}
-                              </div>
+                                    {/* Print view */}
+                                    <div className="hidden print:block text-[8px] font-black text-black uppercase tracking-tight">
+                                      {a.subject_code || a.subject_name}
+                                      {showBadge && (
+                                        <span className="ml-1 text-[7px]">
+                                          ({rotation === 'WEEK_A' ? 'Wk A' : 'Wk B'})
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="hidden print:block text-[8px] text-black capitalize mt-0.5">
+                                      {a.instructor_name}
+                                    </div>
+                                    <div className="hidden print:block text-[7px] text-gray-500 mt-0.5">
+                                      {a.room_name || ''}
+                                    </div>
 
-                              {!isApproved && !isSelected && (
-                                <div className="text-[8px] text-white/20 mt-2 uppercase tracking-widest print:hidden">
-                                  Click to move
-                                </div>
-                              )}
+                                    {!isApproved && !isSelected && (
+                                      <div className="text-[8px] text-white/20 mt-2 uppercase tracking-widest print:hidden">
+                                        Click to move
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          ) : a && a.faded ? (
+                          ) : items.length > 0 && faded ? (
                             <div className="h-28 rounded-[2rem] bg-white/[0.01] border border-white/5 opacity-10 print:h-12 print:rounded-none" />
                           ) : (
                             <div
@@ -375,6 +406,7 @@ export default function ScheduleViewer() {
                         </td>
                       );
                     })}
+                      
                   </tr>
                 ))}
               </tbody>
