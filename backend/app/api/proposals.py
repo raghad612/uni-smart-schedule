@@ -15,6 +15,7 @@ from app.models.subject import Subject
 from app.models.section import Section
 from app.models.room import Room
 from app.models.enums import ProposalStatus, AssignmentStatus, WeekRotation
+from app.services.scheduling_engine import _rotations_overlap
 from app.schemas.proposals import (
     ProposalResponse,
     ProposalDetail,
@@ -267,7 +268,10 @@ def move_assignment(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """Move an assignment to a different slot. Rechecks conflicts after move."""
+    """Move an assignment to a different slot. Rejects moves that would create
+    instructor or room double-booking, taking week_rotation into account
+    (WEEK_A and WEEK_B can legitimately share a slot/room because they
+    alternate). Rechecks conflicts after move."""
     proposal = db.query(ScheduleProposal).filter(ScheduleProposal.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -286,22 +290,45 @@ def move_assignment(
         raise HTTPException(status_code=404, detail="Time slot not found")
 
     ci = db.query(CourseInstance).filter(CourseInstance.id == assignment.course_instance_id).first()
-    conflict_check = (
+
+    # Effective values after the move: room may be overridden by request body,
+    # rotation is carried over from the existing assignment (moves don't
+    # change which week(s) a session falls on).
+    effective_room_id = body.room_id if body.room_id else assignment.room_id
+    moving_rotation = assignment.week_rotation or WeekRotation.ALWAYS
+
+    # Find every OTHER assignment already occupying the destination slot in
+    # this proposal, then reject the move if any of them would clash with
+    # the incoming one. WEEK_A vs WEEK_B is allowed (they alternate); any
+    # other pairing with the same instructor or the same room is a conflict.
+    others_at_dest = (
         db.query(ScheduleAssignment)
         .join(CourseInstance, ScheduleAssignment.course_instance_id == CourseInstance.id)
         .filter(
             ScheduleAssignment.proposal_id == proposal_id,
             ScheduleAssignment.slot_id == body.slot_id,
-            CourseInstance.instructor_id == ci.instructor_id,
             ScheduleAssignment.id != assignment_id,
         )
-        .first()
+        .all()
     )
-    if conflict_check:
-        raise HTTPException(
-            status_code=409,
-            detail="Instructor is already assigned in that slot within this proposal"
-        )
+
+    for other in others_at_dest:
+        other_rotation = other.week_rotation or WeekRotation.ALWAYS
+        if not _rotations_overlap(moving_rotation, other_rotation):
+            continue  # different weeks - safe to share
+        other_ci = db.query(CourseInstance).filter(
+            CourseInstance.id == other.course_instance_id
+        ).first()
+        if other_ci and other_ci.instructor_id == ci.instructor_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Instructor is already assigned in that slot within this proposal"
+            )
+        if effective_room_id and other.room_id == effective_room_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Room is already booked in that slot within this proposal"
+            )
 
     assignment.slot_id = body.slot_id
     if body.room_id:
