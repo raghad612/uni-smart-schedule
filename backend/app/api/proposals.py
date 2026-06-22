@@ -1,3 +1,4 @@
+import math
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
@@ -15,7 +16,7 @@ from app.models.subject import Subject
 from app.models.section import Section
 from app.models.room import Room
 from app.models.enums import ProposalStatus, AssignmentStatus, WeekRotation
-from app.services.scheduling_engine import _rotations_overlap
+from app.services.scheduling_engine import _rotations_overlap, load_committed_slots
 from app.schemas.proposals import (
     ProposalResponse,
     ProposalDetail,
@@ -23,6 +24,7 @@ from app.schemas.proposals import (
     ConflictResponse,
     ResolveConflict,
     MoveAssignment,
+    CreateAssignment,
 )
 
 router = APIRouter()
@@ -71,6 +73,95 @@ def _enrich_conflict(conflict: ConflictLog, db: Session) -> ConflictResponse:
         section_label=section_label,
         slot_label=slot_label,
     )
+
+
+def _check_slot_available(
+    db: Session,
+    proposal_id: int,
+    semester: str,
+    slot_id: int,
+    room_id: Optional[int],
+    instructor_id: int,
+    rotation: WeekRotation,
+    exclude_assignment_id: Optional[int] = None,
+) -> Optional[str]:
+    """
+    Decides whether (instructor_id, room_id, slot_id, rotation) can be placed
+    inside the given proposal without clashing with anything.
+
+    Returns:
+        None  -- slot is free, caller may proceed.
+        str   -- user-friendly explanation of WHY it's blocked, ready to surface
+                 in an HTTP 409 (caller is responsible for raising). Includes
+                 the instructor name / room name / semester label so the admin
+                 immediately sees what's wrong and how to react.
+
+    Checks two layers:
+      1. Other assignments in THIS proposal (same draft) at the same slot,
+         taking week_rotation into account (WEEK_A and WEEK_B alternate, so
+         they can legitimately share a slot/room/instructor).
+      2. Cross-proposal commitments from APPROVED proposals in the same
+         semester (via load_committed_slots). These are conservatively
+         blocked regardless of rotation, matching how the engine treats them
+         during draft generation.
+
+    Pass exclude_assignment_id when checking a MOVE so the assignment being
+    moved doesn't count itself as a conflict.
+    """
+    rotation = rotation or WeekRotation.ALWAYS
+
+    # ---- Layer 1: same-proposal occupants ----
+    query = (
+        db.query(ScheduleAssignment)
+        .filter(
+            ScheduleAssignment.proposal_id == proposal_id,
+            ScheduleAssignment.slot_id == slot_id,
+        )
+    )
+    if exclude_assignment_id is not None:
+        query = query.filter(ScheduleAssignment.id != exclude_assignment_id)
+
+    for other in query.all():
+        other_rotation = other.week_rotation or WeekRotation.ALWAYS
+        if not _rotations_overlap(rotation, other_rotation):
+            continue  # WEEK_A vs WEEK_B - alternates, share is fine
+        other_ci = db.query(CourseInstance).filter(
+            CourseInstance.id == other.course_instance_id
+        ).first()
+        if other_ci and other_ci.instructor_id == instructor_id:
+            instr = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+            name = instr.name.title() if instr else f"Instructor #{instructor_id}"
+            return (
+                f"{name} is already teaching another course in this slot in this draft. "
+                f"Pick a different time slot, or move the other course first."
+            )
+        if room_id and other.room_id == room_id:
+            room = db.query(Room).filter(Room.id == room_id).first()
+            room_name = room.room_name if room else f"Room #{room_id}"
+            return (
+                f"Room {room_name} is already booked in this slot in this draft. "
+                f"Pick a different room or a different time slot."
+            )
+
+    # ---- Layer 2: cross-proposal approved commitments ----
+    instructor_committed, room_committed = load_committed_slots(db, semester)
+    if slot_id in instructor_committed.get(instructor_id, set()):
+        instr = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+        name = instr.name.title() if instr else f"Instructor #{instructor_id}"
+        return (
+            f"{name} is already scheduled in this slot in the approved {semester} "
+            f"schedule (teaching another section). Try a different time slot where "
+            f"they are available."
+        )
+    if room_id and slot_id in room_committed.get(room_id, set()):
+        room = db.query(Room).filter(Room.id == room_id).first()
+        room_name = room.room_name if room else f"Room #{room_id}"
+        return (
+            f"Room {room_name} is already booked in this slot in the approved "
+            f"{semester} schedule. Pick a different room or a different time slot."
+        )
+
+    return None
 
 
 @router.get("/", response_model=list[ProposalResponse])
@@ -269,9 +360,10 @@ def move_assignment(
     admin: User = Depends(require_admin),
 ):
     """Move an assignment to a different slot. Rejects moves that would create
-    instructor or room double-booking, taking week_rotation into account
-    (WEEK_A and WEEK_B can legitimately share a slot/room because they
-    alternate). Rechecks conflicts after move."""
+    instructor or room double-booking (same-proposal OR cross-proposal approved),
+    taking week_rotation into account (WEEK_A and WEEK_B can legitimately share
+    a slot/room because they alternate). Cleans up double-booking conflicts after
+    a successful move."""
     proposal = db.query(ScheduleProposal).filter(ScheduleProposal.id == proposal_id).first()
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -291,44 +383,21 @@ def move_assignment(
 
     ci = db.query(CourseInstance).filter(CourseInstance.id == assignment.course_instance_id).first()
 
-    # Effective values after the move: room may be overridden by request body,
-    # rotation is carried over from the existing assignment (moves don't
-    # change which week(s) a session falls on).
     effective_room_id = body.room_id if body.room_id else assignment.room_id
     moving_rotation = assignment.week_rotation or WeekRotation.ALWAYS
 
-    # Find every OTHER assignment already occupying the destination slot in
-    # this proposal, then reject the move if any of them would clash with
-    # the incoming one. WEEK_A vs WEEK_B is allowed (they alternate); any
-    # other pairing with the same instructor or the same room is a conflict.
-    others_at_dest = (
-        db.query(ScheduleAssignment)
-        .join(CourseInstance, ScheduleAssignment.course_instance_id == CourseInstance.id)
-        .filter(
-            ScheduleAssignment.proposal_id == proposal_id,
-            ScheduleAssignment.slot_id == body.slot_id,
-            ScheduleAssignment.id != assignment_id,
-        )
-        .all()
+    err = _check_slot_available(
+        db=db,
+        proposal_id=proposal_id,
+        semester=proposal.semester,
+        slot_id=body.slot_id,
+        room_id=effective_room_id,
+        instructor_id=ci.instructor_id,
+        rotation=moving_rotation,
+        exclude_assignment_id=assignment_id,
     )
-
-    for other in others_at_dest:
-        other_rotation = other.week_rotation or WeekRotation.ALWAYS
-        if not _rotations_overlap(moving_rotation, other_rotation):
-            continue  # different weeks - safe to share
-        other_ci = db.query(CourseInstance).filter(
-            CourseInstance.id == other.course_instance_id
-        ).first()
-        if other_ci and other_ci.instructor_id == ci.instructor_id:
-            raise HTTPException(
-                status_code=409,
-                detail="Instructor is already assigned in that slot within this proposal"
-            )
-        if effective_room_id and other.room_id == effective_room_id:
-            raise HTTPException(
-                status_code=409,
-                detail="Room is already booked in that slot within this proposal"
-            )
+    if err:
+        raise HTTPException(status_code=409, detail=err)
 
     assignment.slot_id = body.slot_id
     if body.room_id:
@@ -341,6 +410,153 @@ def move_assignment(
 
     db.commit()
 
+    return get_proposal(proposal_id, db, admin)
+
+
+@router.post("/{proposal_id}/assignments", response_model=ProposalDetail)
+def create_assignment(
+    proposal_id: int,
+    body: CreateAssignment,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Place a new session manually (used when the engine couldn't fully assign
+    a course and surfaced an incomplete_assignment conflict).
+
+    Rejects:
+      - approved proposals (read-only)
+      - course_instances that don't belong to this proposal's semester period
+      - missing default room (when caller doesn't supply room_id and the
+        section has none)
+      - over-assignment (course already has ceil(sessions_per_week) sessions)
+      - same-proposal instructor/room double-booking (rotation-aware)
+      - cross-proposal approved instructor/room collisions
+
+    On success:
+      - inserts a new ScheduleAssignment row (status = proposed)
+      - removes stale instructor_double_booked / room_double_booked conflict rows
+      - removes the incomplete_assignment conflict for this course if all
+        required sessions are now placed, or updates its 'missing' count
+        otherwise
+    """
+    proposal = db.query(ScheduleProposal).filter(ScheduleProposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.status == ProposalStatus.approved:
+        raise HTTPException(status_code=400, detail="Cannot edit an approved proposal")
+
+    ci = db.query(CourseInstance).filter(
+        CourseInstance.id == body.course_instance_id
+    ).first()
+    if not ci:
+        raise HTTPException(status_code=404, detail="Course instance not found")
+
+    # Proposal semester is "YYYY-P" (e.g. "2024-2"); course_instance.semester
+    # is just the period ("1" or "2"). Compare the period only.
+    proposal_period = (
+        proposal.semester.split("-")[-1] if "-" in proposal.semester else proposal.semester
+    )
+    if ci.semester != proposal_period:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This course belongs to semester period {ci.semester}, but this "
+                f"proposal is for period {proposal_period}. Pick a course that belongs "
+                f"to this semester."
+            ),
+        )
+
+    slot = db.query(TimeSlot).filter(TimeSlot.id == body.slot_id).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="Time slot not found")
+
+    effective_room_id = body.room_id or (ci.section.default_room_id if ci.section else None)
+    if effective_room_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No room specified and this section has no default room. "
+                "Please pick a room."
+            ),
+        )
+
+    # Over-assignment guard. ceil() matches how the engine derives session count:
+    # 3.5 -> 4 placements (3 ALWAYS + 1 WEEK_A or WEEK_B).
+    required = math.ceil(ci.subject.sessions_per_week) if ci.subject else 1
+    existing_count = (
+        db.query(ScheduleAssignment)
+        .filter(
+            ScheduleAssignment.proposal_id == proposal_id,
+            ScheduleAssignment.course_instance_id == body.course_instance_id,
+        )
+        .count()
+    )
+    if existing_count >= required:
+        code = ci.subject.code if ci.subject else f"course #{ci.id}"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{code} already has all {required} required session(s) assigned "
+                f"in this proposal. Nothing to add."
+            ),
+        )
+
+    rotation = body.week_rotation or WeekRotation.ALWAYS
+    err = _check_slot_available(
+        db=db,
+        proposal_id=proposal_id,
+        semester=proposal.semester,
+        slot_id=body.slot_id,
+        room_id=effective_room_id,
+        instructor_id=ci.instructor_id,
+        rotation=rotation,
+    )
+    if err:
+        raise HTTPException(status_code=409, detail=err)
+
+    new_assignment = ScheduleAssignment(
+        proposal_id=proposal_id,
+        course_instance_id=body.course_instance_id,
+        slot_id=body.slot_id,
+        room_id=effective_room_id,
+        week_rotation=rotation,
+        status=AssignmentStatus.proposed,
+    )
+    db.add(new_assignment)
+    db.flush()
+
+    # Cleanup: stale generic conflicts get cleared (the engine recomputes them
+    # next run anyway).
+    db.query(ConflictLog).filter(
+        ConflictLog.proposal_id == proposal_id,
+        ConflictLog.conflict_type.in_(["instructor_double_booked", "room_double_booked"]),
+    ).delete()
+
+    # Cleanup: the incomplete_assignment row for THIS course is either gone
+    # (if we just completed it) or its "X missing" count needs updating.
+    new_total = existing_count + 1
+    incomplete = (
+        db.query(ConflictLog)
+        .filter(
+            ConflictLog.proposal_id == proposal_id,
+            ConflictLog.course_instance_id == body.course_instance_id,
+            ConflictLog.conflict_type == "incomplete_assignment",
+        )
+        .first()
+    )
+    if incomplete:
+        if new_total >= required:
+            db.delete(incomplete)
+        else:
+            missing = required - new_total
+            code = ci.subject.code if ci.subject else f"course_instance #{ci.id}"
+            incomplete.details = (
+                f"{code} needs {required} session(s)/week, but only {new_total} "
+                f"could be scheduled ({missing} missing). Assign the remaining "
+                f"session(s) manually."
+            )
+
+    db.commit()
     return get_proposal(proposal_id, db, admin)
 
 

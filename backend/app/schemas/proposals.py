@@ -68,3 +68,10 @@ class ResolveConflict(BaseModel):
 class MoveAssignment(BaseModel):
     slot_id: int
     room_id: Optional[int] = None
+
+
+class CreateAssignment(BaseModel):
+    course_instance_id: int
+    slot_id: int
+    room_id: Optional[int] = None
+    week_rotation: WeekRotation = WeekRotation.ALWAYS
