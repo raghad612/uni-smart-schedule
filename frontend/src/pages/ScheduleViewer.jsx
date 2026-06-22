@@ -20,6 +20,51 @@ const sessionTimes = {
   5: '16:00–17:40',
 };
 
+// Sub-row for the Missing Sessions panel. Owns its own rotation-dropdown
+// state so the parent doesn't have to track one per entry.
+function MissingSessionRow({ entry, isActive, onPlace, isPending }) {
+  const [rotation, setRotation] = useState('ALWAYS');
+  return (
+    <div className={`flex items-center gap-3 px-3 py-2 rounded-xl border transition-all ${
+      isActive
+        ? 'bg-emerald-500/10 border-emerald-500/40'
+        : 'bg-white/[0.02] border-white/5 hover:border-white/10'
+    }`}>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-bold text-white truncate">
+          {entry.subjectCode}{entry.subjectName ? ` — ${entry.subjectName}` : ''}
+          <span className="text-white/40 font-medium"> · {entry.instructorName}</span>
+        </p>
+        <p className="text-[10px] text-white/30 mt-0.5">
+          {entry.missingCount} session{entry.missingCount > 1 ? 's' : ''} still need{entry.missingCount > 1 ? '' : 's'} to be placed
+        </p>
+      </div>
+      <select
+        value={rotation}
+        onChange={(e) => setRotation(e.target.value)}
+        disabled={isPending}
+        className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white/70 font-bold outline-none focus:border-white/30 disabled:opacity-30"
+        title="Week rotation for this placement"
+      >
+        <option value="ALWAYS">Every week</option>
+        <option value="WEEK_A">Week A only</option>
+        <option value="WEEK_B">Week B only</option>
+      </select>
+      <button
+        onClick={() => onPlace(entry, rotation)}
+        disabled={isPending}
+        className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-lg transition-all ${
+          isActive
+            ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
+            : 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30'
+        } disabled:opacity-30`}
+      >
+        {isActive ? 'Selected' : 'Place'}
+      </button>
+    </div>
+  );
+}
+
 export default function ScheduleViewer() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -28,6 +73,9 @@ export default function ScheduleViewer() {
 
   const [filter, setFilter] = useState('');
   const [selectedAssignment, setSelectedAssignment] = useState(null);
+  // { courseInstanceId, instructorName, subjectName, subjectCode, rotation }
+  // Mutually exclusive with selectedAssignment - setting one clears the other.
+  const [pendingPlacement, setPendingPlacement] = useState(null);
 
   const { data: proposal, isLoading, isError } = useQuery({
     queryKey: ['proposal', proposalId],
@@ -50,6 +98,36 @@ export default function ScheduleViewer() {
     },
   });
 
+  // Place a missing session (POST /proposals/{id}/assignments).
+  // On 409 errors we deliberately keep pendingPlacement set so the admin can
+  // immediately click another cell without re-clicking the Place button.
+  // On success, if the course still has missing sessions we stay in placement
+  // mode (rapid-fire); if it's complete the entry disappears and we exit.
+  const createMutation = useMutation({
+    mutationFn: ({ courseInstanceId, slotId, rotation }) =>
+      api.post(`/proposals/${proposalId}/assignments`, {
+        course_instance_id: courseInstanceId,
+        slot_id: slotId,
+        week_rotation: rotation || 'ALWAYS',
+      }),
+    onSuccess: (res, variables) => {
+      toast.success('Session placed.');
+      queryClient.setQueryData(['proposal', proposalId], res.data);
+      queryClient.invalidateQueries({ queryKey: ['conflicts', proposalId] });
+      const stillMissing = (res.data.conflicts || []).some(
+        c => c.conflict_type === 'incomplete_assignment'
+          && c.course_instance_id === variables.courseInstanceId
+      );
+      if (!stillMissing) {
+        setPendingPlacement(null);
+      }
+    },
+    onError: (e) => {
+      const detail = e.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to place session.', { duration: 6000 });
+    },
+  });
+
   const cloneMutation = useMutation({
     mutationFn: () => api.post(`/proposals/${proposalId}/clone`),
     onSuccess: (res) => {
@@ -66,6 +144,24 @@ export default function ScheduleViewer() {
   const conflictSlotIds = new Set(
     (proposal?.conflicts || []).map(c => c.slot_id).filter(Boolean)
   );
+
+  // Parse incomplete_assignment conflicts into placeable entries for the
+  // Missing Sessions panel. The backend stores the canonical "(X missing)"
+  // wording in details, so we extract the count directly from that string.
+  const missingSessions = (proposal?.conflicts || [])
+    .filter(c => c.conflict_type === 'incomplete_assignment')
+    .map(c => {
+      const missMatch = (c.details || '').match(/\((\d+) missing\)/);
+      const codeMatch = (c.details || '').match(/^([A-Z0-9]+)/);
+      return {
+        conflictId: c.id,
+        courseInstanceId: c.course_instance_id,
+        instructorName: c.instructor_name,
+        subjectName: c.subject_name,
+        subjectCode: codeMatch ? codeMatch[1] : '',
+        missingCount: missMatch ? parseInt(missMatch[1], 10) : 1,
+      };
+    });
 
 const getAssignments = (slotId) => {
     const all = (proposal?.assignments || []).filter(x => x.slot_id === slotId);
@@ -84,6 +180,25 @@ const getAssignments = (slotId) => {
   const handleCellClick = (slotId, assignment) => {
     if (isApproved) return;
 
+    // Mode 1: placing a missing session
+    if (pendingPlacement) {
+      // Clicking an existing assignment cancels placement and switches to move mode
+      if (assignment && !assignment.faded) {
+        setPendingPlacement(null);
+        setSelectedAssignment(assignment);
+        toast('Switched to move mode.', { icon: '👆', duration: 2500 });
+        return;
+      }
+      // Empty cell: place the session there
+      createMutation.mutate({
+        courseInstanceId: pendingPlacement.courseInstanceId,
+        slotId,
+        rotation: pendingPlacement.rotation,
+      });
+      return;
+    }
+
+    // Mode 2: moving an existing assignment
     if (!selectedAssignment) {
       if (assignment && !assignment.faded) {
         setSelectedAssignment(assignment);
@@ -98,6 +213,20 @@ const getAssignments = (slotId) => {
     }
 
     moveMutation.mutate({ assignmentId: selectedAssignment.id, slotId });
+  };
+
+  // Called by the "Place" button on each Missing Sessions row.
+  // Mutually exclusive with selectedAssignment - clears move mode if active.
+  const startPlacement = (entry, rotation) => {
+    setSelectedAssignment(null);
+    setPendingPlacement({
+      courseInstanceId: entry.courseInstanceId,
+      instructorName: entry.instructorName,
+      subjectName: entry.subjectName,
+      subjectCode: entry.subjectCode,
+      rotation: rotation || 'ALWAYS',
+    });
+    toast('Click an empty slot to place the session.', { icon: '📍', duration: 3000 });
   };
 
   const parseSectionLabel = () => {
@@ -210,31 +339,67 @@ const getAssignments = (slotId) => {
 
       <main className="max-w-[1500px] mx-auto px-8 py-10 print:max-w-none print:px-0 print:py-0">
 
+        {/* Missing-sessions panel - only shown when there are incomplete_assignment conflicts */}
+        {!isApproved && missingSessions.length > 0 && (
+          <div className="mb-6 px-5 py-4 rounded-2xl border bg-red-500/5 border-red-500/20 print:hidden">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">⚠</span>
+              <p className="text-sm font-bold text-red-400">
+                Missing Sessions ({missingSessions.length})
+              </p>
+            </div>
+            <div className="space-y-2">
+              {missingSessions.map((entry) => (
+                <MissingSessionRow
+                  key={entry.conflictId}
+                  entry={entry}
+                  isActive={pendingPlacement?.courseInstanceId === entry.courseInstanceId}
+                  onPlace={startPlacement}
+                  isPending={createMutation.isPending}
+                />
+              ))}
+            </div>
+            <p className="text-[10px] text-white/30 mt-3">
+              Click <span className="text-red-300/80 font-bold">Place</span> on a row, then click any empty cell in the grid to drop the session there.
+            </p>
+          </div>
+        )}
+
         {/* Edit mode banner — hidden on print */}
         {!isApproved && (
           <div className={`mb-6 px-5 py-3 rounded-2xl border flex items-center justify-between print:hidden ${
-            selectedAssignment
+            pendingPlacement
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : selectedAssignment
               ? 'bg-yellow-500/10 border-yellow-500/30'
               : 'bg-blue-500/10 border-blue-500/20'
           }`}>
             <div className="flex items-center gap-3">
-              <span className="text-lg">{selectedAssignment ? '👆' : '✏️'}</span>
+              <span className="text-lg">{pendingPlacement ? '📍' : selectedAssignment ? '👆' : '✏️'}</span>
               <div>
-                <p className={`text-sm font-bold ${selectedAssignment ? 'text-yellow-400' : 'text-blue-400'}`}>
-                  {selectedAssignment
+                <p className={`text-sm font-bold ${
+                  pendingPlacement ? 'text-emerald-400'
+                    : selectedAssignment ? 'text-yellow-400'
+                    : 'text-blue-400'
+                }`}>
+                  {pendingPlacement
+                    ? `Placing: ${pendingPlacement.subjectCode || pendingPlacement.subjectName} (${pendingPlacement.instructorName}${pendingPlacement.rotation !== 'ALWAYS' ? `, ${pendingPlacement.rotation === 'WEEK_A' ? 'Week A' : 'Week B'}` : ''})`
+                    : selectedAssignment
                     ? `Moving: ${selectedAssignment.subject_name} (${selectedAssignment.instructor_name})`
                     : 'Edit Mode — Click any assigned cell to move it'}
                 </p>
                 <p className="text-[10px] text-white/30">
-                  {selectedAssignment
+                  {pendingPlacement
+                    ? 'Click any empty slot in the grid to place this session. Click an existing assignment to switch to move mode.'
+                    : selectedAssignment
                     ? 'Click an empty slot to place it there, or click another assignment to swap them. Click the same cell to cancel.'
                     : 'Approved proposals cannot be edited. Clone first to create an editable copy.'}
                 </p>
               </div>
             </div>
-            {selectedAssignment && (
+            {(pendingPlacement || selectedAssignment) && (
               <button
-                onClick={() => setSelectedAssignment(null)}
+                onClick={() => { setSelectedAssignment(null); setPendingPlacement(null); }}
                 className="text-[10px] font-black uppercase bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-all text-white/50"
               >
                 Cancel
@@ -305,7 +470,7 @@ const getAssignments = (slotId) => {
                       const slotId = di * 5 + slot;
                       const { items, faded } = getAssignments(slotId);
                       const hasConflict = conflictSlotIds.has(slotId);
-                      const isTarget = !!selectedAssignment && items.length === 0;
+                      const isTarget = (!!selectedAssignment || !!pendingPlacement) && items.length === 0;
 
                       return (
                         <td key={di} className="min-w-[180px] align-top print:min-w-0 print:border print:border-gray-300">
@@ -387,16 +552,20 @@ const getAssignments = (slotId) => {
                             <div className="h-28 rounded-[2rem] bg-white/[0.01] border border-white/5 opacity-10 print:h-12 print:rounded-none" />
                           ) : (
                             <div
-                              onClick={() => selectedAssignment && handleCellClick(slotId, null)}
+                              onClick={() => (selectedAssignment || pendingPlacement) && handleCellClick(slotId, null)}
                               className={`h-28 rounded-[2rem] border transition-all flex items-center justify-center print:h-12 print:rounded-none print:border-0 ${
                                 isTarget && !isApproved
-                                  ? 'border-blue-500/40 bg-blue-500/5 cursor-pointer hover:bg-blue-500/10 hover:border-blue-500/60'
+                                  ? pendingPlacement
+                                    ? 'border-emerald-500/40 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/60'
+                                    : 'border-blue-500/40 bg-blue-500/5 cursor-pointer hover:bg-blue-500/10 hover:border-blue-500/60'
                                   : 'border-dashed border-white/[0.05] bg-white/[0.01]'
                               }`}
                             >
                               {isTarget && !isApproved ? (
-                                <span className="text-[10px] font-black text-blue-400/60 uppercase tracking-widest print:hidden">
-                                  Place here
+                                <span className={`text-[10px] font-black uppercase tracking-widest print:hidden ${
+                                  pendingPlacement ? 'text-emerald-400/70' : 'text-blue-400/60'
+                                }`}>
+                                  {pendingPlacement ? 'Drop here' : 'Place here'}
                                 </span>
                               ) : (
                                 <span className="text-[9px] font-black text-white/[0.03] tracking-[0.4em] uppercase print:hidden">Free</span>
