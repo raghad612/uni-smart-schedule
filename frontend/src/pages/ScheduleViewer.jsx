@@ -46,9 +46,9 @@ function MissingSessionRow({ entry, isActive, onPlace, isPending }) {
         className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white/70 font-bold outline-none focus:border-white/30 disabled:opacity-30"
         title="Week rotation for this placement"
       >
-        <option value="ALWAYS">Every week</option>
-        <option value="WEEK_A">Week A only</option>
-        <option value="WEEK_B">Week B only</option>
+        <option value="ALWAYS" className="bg-slate-900 text-white">Every week</option>
+        <option value="WEEK_A" className="bg-slate-900 text-white">Week A only</option>
+        <option value="WEEK_B" className="bg-slate-900 text-white">Week B only</option>
       </select>
       <button
         onClick={() => onPlace(entry, rotation)}
@@ -152,7 +152,7 @@ export default function ScheduleViewer() {
     .filter(c => c.conflict_type === 'incomplete_assignment')
     .map(c => {
       const missMatch = (c.details || '').match(/\((\d+) missing\)/);
-      const codeMatch = (c.details || '').match(/^([A-Z0-9]+)/);
+      const codeMatch = (c.details || '').match(/^([A-Z0-9_]+)/);
       return {
         conflictId: c.id,
         courseInstanceId: c.course_instance_id,
