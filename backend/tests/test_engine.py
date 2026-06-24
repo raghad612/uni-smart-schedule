@@ -631,3 +631,276 @@ def test_assign_slots_without_time_slots_param_is_backward_compatible():
     ci_assignments = [a for a in assignments if a["course_instance_id"] == 93]
     assert len(ci_assignments) == 3
     assert conflicts == []
+
+    # ---------- Phase 3: lock carry-forward in engine ----------
+
+def test_optimise_gaps_skips_locked_assignments():
+    """Locked assignments must NOT be swapped by the optimizer, even when a
+    swap would reduce the gap score."""
+    from app.services.scheduling_engine import optimise_gaps
+
+    # Two instructors, both with sessions on Monday with a gap that a swap
+    # would close. Mark both as locked - the swap should NOT happen.
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Monday", slot_num=2),
+        MockTimeSlot(id=3, day="Monday", slot_num=3),
+        MockTimeSlot(id=4, day="Monday", slot_num=4),
+    ]
+    avail = [
+        MockAvailabilityRow(1, 100, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 100, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 100, 3, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(4, 100, 4, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(5, 200, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(6, 200, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(7, 200, 3, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(8, 200, 4, AvailabilityPreference.AVAILABLE),
+    ]
+
+    # Instructor 100 has sessions at slots 1 and 4 (big gap)
+    # Instructor 200 has sessions at slots 2 and 3 (no gap)
+    # Swapping (100's slot 4) with (200's slot 2) reduces 100's gap.
+    locked_assignments = [
+        {"course_instance_id": 1, "slot_id": 1, "instructor_id": 100,
+         "room_id": 10, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+        {"course_instance_id": 2, "slot_id": 4, "instructor_id": 100,
+         "room_id": 10, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+        {"course_instance_id": 3, "slot_id": 2, "instructor_id": 200,
+         "room_id": 20, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+        {"course_instance_id": 4, "slot_id": 3, "instructor_id": 200,
+         "room_id": 20, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+    ]
+
+    result = optimise_gaps(locked_assignments, time_slots, avail)
+
+    # Verify nothing moved - same slot_ids for same course_instance_ids
+    result_slots = {a["course_instance_id"]: a["slot_id"] for a in result}
+    expected_slots = {1: 1, 2: 4, 3: 2, 4: 3}
+    assert result_slots == expected_slots, \
+        f"Locked assignments should not move. Got {result_slots}, expected {expected_slots}"
+
+
+def test_optimise_gaps_swaps_when_neither_locked():
+    """Sanity baseline: same setup as above but neither locked - swap SHOULD happen."""
+    from app.services.scheduling_engine import optimise_gaps
+
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Monday", slot_num=2),
+        MockTimeSlot(id=3, day="Monday", slot_num=3),
+        MockTimeSlot(id=4, day="Monday", slot_num=4),
+    ]
+    avail = [
+        MockAvailabilityRow(1, 100, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 100, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 100, 3, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(4, 100, 4, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(5, 200, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(6, 200, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(7, 200, 3, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(8, 200, 4, AvailabilityPreference.AVAILABLE),
+    ]
+    unlocked_assignments = [
+        {"course_instance_id": 1, "slot_id": 1, "instructor_id": 100,
+         "room_id": 10, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+        {"course_instance_id": 2, "slot_id": 4, "instructor_id": 100,
+         "room_id": 10, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+        {"course_instance_id": 3, "slot_id": 2, "instructor_id": 200,
+         "room_id": 20, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+        {"course_instance_id": 4, "slot_id": 3, "instructor_id": 200,
+         "room_id": 20, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+    ]
+    result = optimise_gaps(unlocked_assignments, time_slots, avail)
+    # The optimizer should have reduced the gap score below the original
+    original_score = calculate_gap_score(unlocked_assignments, time_slots)
+    new_score = calculate_gap_score(result, time_slots)
+    assert new_score < original_score, \
+        f"Without locks, optimizer should reduce score. {original_score} -> {new_score}"
+
+
+def test_optimise_gaps_skips_swap_when_only_one_side_locked():
+    """If just ONE side of a candidate swap is locked, the swap is still
+    rejected. The lock-skip guard must check BOTH sides."""
+    from app.services.scheduling_engine import optimise_gaps
+
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Monday", slot_num=2),
+        MockTimeSlot(id=3, day="Monday", slot_num=3),
+        MockTimeSlot(id=4, day="Monday", slot_num=4),
+    ]
+    avail = [
+        MockAvailabilityRow(1, 100, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 100, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(3, 100, 3, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(4, 100, 4, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(5, 200, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(6, 200, 2, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(7, 200, 3, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(8, 200, 4, AvailabilityPreference.AVAILABLE),
+    ]
+    # 100's slot 4 is LOCKED. 200's slot 2 is UNLOCKED. The swap that would
+    # reduce gap involves both - must be rejected.
+    mixed = [
+        {"course_instance_id": 1, "slot_id": 1, "instructor_id": 100,
+         "room_id": 10, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+        {"course_instance_id": 2, "slot_id": 4, "instructor_id": 100,
+         "room_id": 10, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+        {"course_instance_id": 3, "slot_id": 2, "instructor_id": 200,
+         "room_id": 20, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+        {"course_instance_id": 4, "slot_id": 3, "instructor_id": 200,
+         "room_id": 20, "week_rotation": WeekRotation.ALWAYS, "locked": False},
+    ]
+    result = optimise_gaps(mixed, time_slots, avail)
+    # CI 2 (locked, slot 4) must still be at slot 4
+    locked_assignment = next(a for a in result if a["course_instance_id"] == 2)
+    assert locked_assignment["slot_id"] == 4, \
+        "Locked assignment must not move even if its swap partner is unlocked"
+
+
+def test_assign_slots_with_inherited_locks_skips_already_placed_sessions():
+    """A 2-sessions/week course with 1 inherited lock should only get 1 more
+    session placed, not 2 (which would produce 3 total)."""
+    instructors = [MockInstructor(id=100, type=InstructorType.FULL_TIME)]
+    ci = MockCourseInstance(id=50, instructor_id=100, sessions_per_week=2.0, code="IN1106", room_id=10)
+    # 5 availability slots, plenty of room to place
+    avail = [
+        MockAvailabilityRow(i, 100, i, AvailabilityPreference.AVAILABLE)
+        for i in range(1, 6)
+    ]
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Tuesday", slot_num=1),
+        MockTimeSlot(id=3, day="Wednesday", slot_num=1),
+        MockTimeSlot(id=4, day="Thursday", slot_num=1),
+        MockTimeSlot(id=5, day="Friday", slot_num=1),
+    ]
+
+    # Pre-place 1 session via inheritance
+    inherited = [{
+        "course_instance_id": 50,
+        "slot_id": 1,
+        "room_id": 10,
+        "instructor_id": 100,
+        "week_rotation": WeekRotation.ALWAYS,
+        "locked": True,
+        "locked_by": 1,
+        "locked_at": None,
+    }]
+
+    assignments, conflicts = assign_slots(
+        instructors, [ci], avail, time_slots=time_slots,
+        inherited_locks=inherited,
+    )
+
+    # Exactly 2 total: 1 inherited + 1 newly placed
+    ci_assignments = [a for a in assignments if a["course_instance_id"] == 50]
+    assert len(ci_assignments) == 2, \
+        f"Expected 2 total assignments (1 inherited + 1 new), got {len(ci_assignments)}"
+
+    # Verify the inherited one is preserved exactly with locked=True
+    inherited_in_result = next(a for a in ci_assignments if a["slot_id"] == 1)
+    assert inherited_in_result["locked"] is True
+
+    # The new one should be unlocked
+    new_in_result = next(a for a in ci_assignments if a["slot_id"] != 1)
+    assert new_in_result["locked"] is False
+
+    # No incomplete_assignment conflict should be raised
+    incomplete = [c for c in conflicts if c["conflict_type"] == "incomplete_assignment"]
+    assert incomplete == [], \
+        f"Course is now complete via 1 inherited + 1 new, expected no incomplete conflict. Got: {incomplete}"
+
+
+def test_assign_slots_with_all_sessions_inherited_skips_course_entirely():
+    """If all required sessions are inherited as locks, the engine places
+    nothing new for that course."""
+    instructors = [MockInstructor(id=100, type=InstructorType.FULL_TIME)]
+    ci = MockCourseInstance(id=50, instructor_id=100, sessions_per_week=2.0, code="IN1106", room_id=10)
+    avail = [
+        MockAvailabilityRow(i, 100, i, AvailabilityPreference.AVAILABLE)
+        for i in range(1, 6)
+    ]
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Tuesday", slot_num=1),
+        MockTimeSlot(id=3, day="Wednesday", slot_num=1),
+    ]
+    inherited = [
+        {"course_instance_id": 50, "slot_id": 1, "room_id": 10,
+         "instructor_id": 100, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+        {"course_instance_id": 50, "slot_id": 2, "room_id": 10,
+         "instructor_id": 100, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+    ]
+
+    assignments, conflicts = assign_slots(
+        instructors, [ci], avail, time_slots=time_slots,
+        inherited_locks=inherited,
+    )
+
+    ci_assignments = [a for a in assignments if a["course_instance_id"] == 50]
+    assert len(ci_assignments) == 2, \
+        f"Both required sessions already inherited; expected no new placements. Got {len(ci_assignments)}"
+    # All should be locked (inherited)
+    assert all(a.get("locked") for a in ci_assignments)
+
+
+def test_assign_slots_inherited_lock_blocks_other_courses_in_same_slot():
+    """An inherited lock at instructor X's slot S must prevent OTHER courses
+    taught by instructor X from being placed at slot S in the new draft."""
+    instructors = [MockInstructor(id=100, type=InstructorType.FULL_TIME)]
+    ci_locked = MockCourseInstance(
+        id=50, instructor_id=100, sessions_per_week=1.0, code="IN1106", room_id=10,
+    )
+    ci_other = MockCourseInstance(
+        id=51, instructor_id=100, sessions_per_week=1.0, code="MA2202", room_id=10,
+    )
+    # Both courses' instructor has 2 slots available - if locked at slot 1,
+    # ci_other should be forced to slot 2.
+    avail = [
+        MockAvailabilityRow(1, 100, 1, AvailabilityPreference.AVAILABLE),
+        MockAvailabilityRow(2, 100, 2, AvailabilityPreference.AVAILABLE),
+    ]
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Tuesday", slot_num=1),
+    ]
+    inherited = [
+        {"course_instance_id": 50, "slot_id": 1, "room_id": 10,
+         "instructor_id": 100, "week_rotation": WeekRotation.ALWAYS, "locked": True},
+    ]
+
+    assignments, conflicts = assign_slots(
+        instructors, [ci_locked, ci_other], avail, time_slots=time_slots,
+        inherited_locks=inherited,
+    )
+
+    # ci_locked still at slot 1
+    locked_one = next(a for a in assignments if a["course_instance_id"] == 50)
+    assert locked_one["slot_id"] == 1
+    # ci_other placed at slot 2 (slot 1 was blocked by the inherited lock)
+    other_one = next(a for a in assignments if a["course_instance_id"] == 51)
+    assert other_one["slot_id"] == 2, \
+        f"Expected ci_other forced to slot 2 because slot 1 was occupied by inherited lock. Got slot {other_one['slot_id']}"
+
+
+def test_assign_slots_emits_locked_false_on_engine_placements():
+    """Every engine-placed assignment must have locked=False (so save_proposal
+    persists it correctly)."""
+    instructors = [MockInstructor(id=100, type=InstructorType.FULL_TIME)]
+    ci = MockCourseInstance(id=50, instructor_id=100, sessions_per_week=2.0, code="IN1106", room_id=10)
+    avail = [
+        MockAvailabilityRow(i, 100, i, AvailabilityPreference.AVAILABLE)
+        for i in range(1, 4)
+    ]
+    time_slots = [
+        MockTimeSlot(id=1, day="Monday", slot_num=1),
+        MockTimeSlot(id=2, day="Tuesday", slot_num=1),
+    ]
+
+    assignments, _ = assign_slots(instructors, [ci], avail, time_slots=time_slots)
+    assert len(assignments) == 2
+    for a in assignments:
+        assert "locked" in a, "Every assignment dict must have a 'locked' key"
+        assert a["locked"] is False, "Engine-placed assignments must be born unlocked"

@@ -10,6 +10,7 @@ from app.models.section import Section
 from app.services.scheduling_engine import (
     load_data,
     load_committed_slots,
+    load_inherited_locks,
     validate_availability,
     sort_instructors,
     assign_slots,
@@ -65,12 +66,28 @@ def run_scheduling_engine(
             + (f" in section '{section_label}'" if section_label else "")
         )
 
-    # Step 2 - load committed slots from approved proposals this semester
+  # Step 2 - load committed slots from approved proposals this semester
     instructor_committed, room_committed = load_committed_slots(db, body.semester)
 
     # Step 2b - time slots, needed for gap scoring AND for the assignment
     # step's day-spread logic (max 2 sessions/day per course)
     time_slots = db.query(TimeSlot).all()
+
+    # Step 2c - Phase 3 / Option B: inherit locks from most recent draft.
+    # Locked sessions from the previous draft for this semester are carried
+    # forward as hard constraints in the new proposal.
+    inherited_locks, carry_errors, source_draft_id = load_inherited_locks(
+        db, body.semester
+    )
+
+    # Inherited locks become hard constraints for OTHER courses too - we
+    # merge their (instructor, slot) and (room, slot) pairs into the
+    # committed maps so no other course tries to use them. This is identical
+    # to how approved-proposal slots are treated.
+    for lock in inherited_locks:
+        instructor_committed.setdefault(lock["instructor_id"], set()).add(lock["slot_id"])
+        if lock.get("room_id"):
+            room_committed.setdefault(lock["room_id"], set()).add(lock["slot_id"])
 
     # Step 3 - validate
     validation_errors = validate_availability(instructors, availability, course_instances)
@@ -78,7 +95,7 @@ def run_scheduling_engine(
     # Step 4 - sort
     sorted_instructors = sort_instructors(instructors, course_instances)
 
-    # Step 5 - assign
+    # Step 5 - assign (with inherited locks pre-placed)
     assignments, assign_conflicts = assign_slots(
         sorted_instructors,
         course_instances,
@@ -86,6 +103,7 @@ def run_scheduling_engine(
         time_slots=time_slots,
         instructor_committed=instructor_committed,
         room_committed=room_committed,
+        inherited_locks=inherited_locks,
     )
 
     # Step 6 - gap score
@@ -103,6 +121,19 @@ def run_scheduling_engine(
     # Step 8 - detect conflicts
     conflicts = detect_conflicts(assignments)
     conflicts.extend(assign_conflicts)
+
+    # Phase 3: surface any locks that couldn't be carried forward (deleted
+    # course, deactivated instructor, deleted room). These show up in the
+    # new proposal as `lock_carried_invalid` conflict rows so the admin
+    # sees exactly which previously-locked sessions need re-attention.
+    for err in carry_errors:
+        conflicts.append({
+            "conflict_type": "lock_carried_invalid",
+            "course_instance_id": err.get("course_instance_id"),
+            "instructor_id": err.get("instructor_id"),
+            "slot_id": err.get("slot_id"),
+            "details": err.get("details"),
+        })
 
     # Step 9 - save
     notes = body.notes
@@ -128,4 +159,9 @@ def run_scheduling_engine(
         "conflicts": conflicts,
         "validation_errors": validation_errors,
         "section_label": section_label,
+        # Phase 3: inheritance summary for the frontend to show admins
+        # exactly what carried over and what didn't.
+        "inherited_locks_count": len(inherited_locks),
+        "inherited_locks_invalid_count": len(carry_errors),
+        "inherited_from_proposal_id": source_draft_id,
     }

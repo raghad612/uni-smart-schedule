@@ -268,22 +268,65 @@ def assign_slots(
     instructor_committed: dict = None,
     room_committed: dict = None,
     max_sessions_per_day: int = 2,
+    inherited_locks: list = None,
 ) -> tuple[list, list]:
+    """
+    Greedy slot assignment.
+
+    Phase 3 / Option B addition - `inherited_locks`:
+        A list of pre-placed assignment dicts (typically from
+        load_inherited_locks). These are treated as hard constraints:
+          - They appear in the output `assignments` list as-is, with their
+            `locked=True` flag preserved so save_proposal persists them.
+          - Their slots are pre-reserved in used_instructor_slots and
+            used_room_slots so the greedy loop never tries to overwrite
+            them.
+          - Each one decrements sessions_needed for its course_instance,
+            so a 2-sessions/week course with 1 inherited lock only gets
+            1 more session placed (not 2 → which would produce 3 total).
+    """
     if instructor_committed is None:
         instructor_committed = {}
     if room_committed is None:
         room_committed = {}
     if time_slots is None:
         time_slots = []
+    if inherited_locks is None:
+        inherited_locks = []
 
     slot_day: dict[int, str] = {ts.id: ts.day for ts in time_slots}
 
-    assignments = []
+    # Start with inherited locks already in the output list. We make a list
+    # copy so callers can keep using their original reference safely.
+    assignments = list(inherited_locks)
     conflicts = []
 
     # used_instructor_slots[instructor_id][slot_id] = list of rotations already placed there
     used_instructor_slots: dict[int, dict[int, list]] = {}
     used_room_slots: dict[int, dict[int, list]] = {}
+
+    # ---- Phase 3: pre-seed used_* and placed counts from inherited locks ----
+    placed_per_ci: dict[int, int] = {}
+    inherited_days_by_ci: dict[int, dict[str, int]] = {}
+    inherited_slots_by_ci: dict[int, set] = {}
+
+    for lock in inherited_locks:
+        instr_id = lock["instructor_id"]
+        slot_id = lock["slot_id"]
+        room_id = lock.get("room_id")
+        rotation = lock.get("week_rotation", WeekRotation.ALWAYS)
+        ci_id = lock["course_instance_id"]
+
+        used_instructor_slots.setdefault(instr_id, {}).setdefault(slot_id, []).append(rotation)
+        if room_id:
+            used_room_slots.setdefault(room_id, {}).setdefault(slot_id, []).append(rotation)
+
+        placed_per_ci[ci_id] = placed_per_ci.get(ci_id, 0) + 1
+        inherited_slots_by_ci.setdefault(ci_id, set()).add(slot_id)
+        day = slot_day.get(slot_id)
+        if day is not None:
+            inherited_days_by_ci.setdefault(ci_id, {})
+            inherited_days_by_ci[ci_id][day] = inherited_days_by_ci[ci_id].get(day, 0) + 1
 
     instructor_order = {inst.id: idx for idx, inst in enumerate(sorted_instructors)}
     sorted_instances = sorted(
@@ -323,17 +366,27 @@ def assign_slots(
         room_id = ci.section.default_room_id if ci.section else None
         instructor_id = ci.instructor_id
 
-        # How many sessions/week does this course_instance need?
-        # e.g. 2.0 -> 2 fixed (ALWAYS) sessions.
-        # 3.5 -> 3 fixed (ALWAYS) sessions + 1 alternating (WEEK_A/WEEK_B) session.
         sessions_per_week = ci.subject.sessions_per_week if ci.subject else 1.0
         fixed_sessions = int(sessions_per_week)
         has_alternating = (sessions_per_week - fixed_sessions) > 1e-9
         sessions_needed = fixed_sessions + (1 if has_alternating else 0)
 
-        used_slot_ids_this_ci: set = set()
-        used_days_this_ci: dict[str, int] = {}
-        placed = 0
+        # Phase 3: subtract whatever's already placed via inherited locks.
+        inherited_for_this_ci = [
+            l for l in inherited_locks if l["course_instance_id"] == ci.id
+        ]
+        inherited_always = sum(
+            1 for l in inherited_for_this_ci
+            if l.get("week_rotation", WeekRotation.ALWAYS) == WeekRotation.ALWAYS
+        )
+        inherited_alternating = len(inherited_for_this_ci) - inherited_always
+
+        fixed_sessions_to_place = max(0, fixed_sessions - inherited_always)
+        place_alternating = has_alternating and inherited_alternating == 0
+
+        used_slot_ids_this_ci: set = set(inherited_slots_by_ci.get(ci.id, set()))
+        used_days_this_ci: dict[str, int] = dict(inherited_days_by_ci.get(ci.id, {}))
+        placed = len(inherited_for_this_ci)
 
         def try_place(rotation, allow_repeat_day):
             """
@@ -376,24 +429,23 @@ def assign_slots(
                     "instructor_id": instructor_id,
                     "avail_id": avail_row.id,
                     "week_rotation": rotation,
+                    # Engine-placed assignments are never born locked.
+                    "locked": False,
                 })
                 placed += 1
                 return True
             return False
 
-        # Place the fixed (every-week) sessions first - spread across
-        # different days where possible (Pass 1), falling back to a
-        # second session on the same day only if no fresh day is
-        # available (Pass 2), and never exceeding max_sessions_per_day.
-        for _ in range(fixed_sessions):
+        # Place the fixed (every-week) sessions first.
+        # Phase 3: fixed_sessions_to_place is fixed_sessions minus any
+        # ALWAYS sessions already inherited as locked from a previous draft.
+        for _ in range(fixed_sessions_to_place):
             if not try_place(WeekRotation.ALWAYS, allow_repeat_day=False):
                 try_place(WeekRotation.ALWAYS, allow_repeat_day=True)
 
-        # Place the alternating session, if this course has one - try
-        # WEEK_A first, fall back to WEEK_B (lets a different alternating
-        # course share the same slot/room on the opposite week). Also
-        # subject to the same day-spread rule as the fixed sessions.
-        if has_alternating:
+        # Place the alternating session, if this course has one.
+        # Phase 3: skip if the alternating session was already inherited.
+        if place_alternating:
             placed_alt = try_place(WeekRotation.WEEK_A, allow_repeat_day=False) or \
                          try_place(WeekRotation.WEEK_A, allow_repeat_day=True)
             if not placed_alt:
@@ -415,7 +467,6 @@ def assign_slots(
                 ),
             })
     return assignments, conflicts
-
 
 def calculate_gap_score(assignments: list, time_slots: list) -> int:
     slot_info: dict[int, tuple[int, int]] = {}
@@ -468,6 +519,14 @@ def optimise_gaps(
         for i in range(len(best)):
             for j in range(i + 1, len(best)):
                 if best[i]["instructor_id"] == best[j]["instructor_id"]:
+                    continue
+
+                # Phase 3: locked assignments are off-limits to the optimizer.
+                # If EITHER side of a candidate swap is locked, skip - the
+                # admin's manual lock decision overrides the gap heuristic.
+                # Must be inside the inner pair loop so we still consider
+                # OTHER pairs that don't involve the locked assignment.
+                if best[i].get("locked") or best[j].get("locked"):
                     continue
 
                 new_i_slot = best[j]["slot_id"]
@@ -647,6 +706,14 @@ def save_proposal(
             room_id=a.get("room_id"),
             week_rotation=a.get("week_rotation", WeekRotation.ALWAYS),
             status=AssignmentStatus.proposed,
+            # Phase 3: persist lock state. Engine-placed assignments come
+            # with locked=False by default. Inherited-and-carried locks come
+            # with locked=True and the original locked_by/locked_at preserved
+            # (so the audit trail points back to the same admin who originally
+            # locked it, not whoever ran the engine this time).
+            locked=a.get("locked", False),
+            locked_by=a.get("locked_by"),
+            locked_at=a.get("locked_at"),
         )
         db.add(row)
 
