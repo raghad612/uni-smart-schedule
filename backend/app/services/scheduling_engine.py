@@ -56,6 +56,152 @@ def load_committed_slots(db: Session, semester: str) -> tuple[dict, dict]:
     return instructor_committed, room_committed
 
 
+def load_inherited_locks(db: Session, semester: str) -> tuple[list, list, int | None]:
+    """
+    Phase 3 / Option B - lock carry-forward.
+
+    Find the MOST RECENT draft proposal for `semester` and pull its locked
+    assignments. Validate each one against current world state so we don't
+    inherit references to deleted courses, deactivated instructors, or
+    missing rooms.
+
+    Returns a 3-tuple:
+      valid_locks: list of dicts shaped like engine assignments, ready to be
+                   pre-placed before the greedy assignment loop runs. Each
+                   dict carries: course_instance_id, slot_id, room_id,
+                   instructor_id, week_rotation, locked=True, locked_by,
+                   locked_at, original_assignment_id (audit trail back to
+                   the source draft).
+      carry_errors: list of dicts shaped {"reason": str, "details": str,
+                    "course_instance_id": int|None, "instructor_id": int|None,
+                    "slot_id": int|None}. The scheduling endpoint surfaces
+                    these as `lock_carried_invalid` conflict_log rows in the
+                    new proposal so the admin sees what couldn't be carried
+                    over and why.
+      source_draft_id: id of the draft we inherited from, or None if no
+                      draft existed for this semester.
+
+    Notes:
+      - We only inherit from DRAFT proposals. Approved proposals are already
+        handled by load_committed_slots and are immutable, so their "locks"
+        are implicit.
+      - "Most recent" = highest created_at. The Phase 3 design decision was
+        to inherit from the most recent draft only (not the union of all
+        drafts), to avoid contradictions when multiple drafts have conflicting
+        locks for the same course.
+      - Validation drops locks whose course_instance, instructor, or room has
+        been deleted, or whose instructor was deactivated. Slots are never
+        validated because time_slots is seeded once and never mutated.
+    """
+    most_recent = (
+        db.query(ScheduleProposal)
+        .filter(
+            ScheduleProposal.semester == semester,
+            ScheduleProposal.status == ProposalStatus.draft,
+        )
+        .order_by(ScheduleProposal.created_at.desc(), ScheduleProposal.id.desc())
+        .first()
+    )
+
+    if not most_recent:
+        return [], [], None
+
+    locked_assignments = (
+        db.query(ScheduleAssignment)
+        .filter(
+            ScheduleAssignment.proposal_id == most_recent.id,
+            ScheduleAssignment.locked == True,  # noqa: E712 - SQLAlchemy needs ==, not `is`
+        )
+        .all()
+    )
+
+    valid_locks: list = []
+    carry_errors: list = []
+
+    for a in locked_assignments:
+        # Validate course_instance exists. If the admin deleted IN_EDGE_A
+        # from the catalog after locking it, the reference is dead.
+        ci = db.query(CourseInstance).filter(
+            CourseInstance.id == a.course_instance_id
+        ).first()
+        if ci is None:
+            carry_errors.append({
+                "reason": "course_deleted",
+                "details": (
+                    f"Locked assignment in Draft #{most_recent.id} pointed to a "
+                    f"course_instance that no longer exists. The lock was dropped "
+                    f"during schedule generation."
+                ),
+                "course_instance_id": a.course_instance_id,
+                "instructor_id": None,
+                "slot_id": a.slot_id,
+            })
+            continue
+
+        # Validate instructor exists AND is still active. A deactivated
+        # instructor shouldn't have new sessions scheduled, even if locked.
+        instructor = ci.instructor  # eager-loaded via relationship
+        if instructor is None:
+            carry_errors.append({
+                "reason": "instructor_deleted",
+                "details": (
+                    f"Locked assignment in Draft #{most_recent.id} pointed to an "
+                    f"instructor that no longer exists. The lock was dropped."
+                ),
+                "course_instance_id": ci.id,
+                "instructor_id": None,
+                "slot_id": a.slot_id,
+            })
+            continue
+        if not instructor.is_active:
+            carry_errors.append({
+                "reason": "instructor_inactive",
+                "details": (
+                    f"Locked assignment for {instructor.name.title()} in Draft "
+                    f"#{most_recent.id} was dropped because the instructor is no "
+                    f"longer active."
+                ),
+                "course_instance_id": ci.id,
+                "instructor_id": instructor.id,
+                "slot_id": a.slot_id,
+            })
+            continue
+
+        # Validate room exists.
+        if a.room_id is not None and a.room is None:
+            subject_code = ci.subject.code if ci.subject else f"course #{ci.id}"
+            carry_errors.append({
+                "reason": "room_deleted",
+                "details": (
+                    f"Locked assignment for {subject_code} in Draft "
+                    f"#{most_recent.id} pointed to a room that no longer exists. "
+                    f"The lock was dropped."
+                ),
+                "course_instance_id": ci.id,
+                "instructor_id": instructor.id,
+                "slot_id": a.slot_id,
+            })
+            continue
+
+        valid_locks.append({
+            "course_instance_id": a.course_instance_id,
+            "slot_id": a.slot_id,
+            "room_id": a.room_id,
+            "instructor_id": ci.instructor_id,
+            "week_rotation": a.week_rotation or WeekRotation.ALWAYS,
+            "locked": True,
+            "locked_by": a.locked_by,
+            "locked_at": a.locked_at,
+            # Audit pointer back to the source draft so future debugging
+            # (or a possible UI "show source" feature) can trace the
+            # provenance of a locked assignment.
+            "_inherited_from_proposal_id": most_recent.id,
+            "_inherited_from_assignment_id": a.id,
+        })
+
+    return valid_locks, carry_errors, most_recent.id
+
+
 def compute_required_sessions(course_instances: list) -> dict[int, int]:
     """
     Derives each instructor's required sessions/week from the courses they
