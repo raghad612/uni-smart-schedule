@@ -1,4 +1,5 @@
 import math
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
@@ -25,6 +26,7 @@ from app.schemas.proposals import (
     ResolveConflict,
     MoveAssignment,
     CreateAssignment,
+    LockAssignment,
 )
 
 router = APIRouter()
@@ -220,6 +222,9 @@ def get_approved_proposal(
             subject_name=a.course_instance.subject.name if a.course_instance and a.course_instance.subject else None,
             subject_code=a.course_instance.subject.code if a.course_instance and a.course_instance.subject else None,
             room_name=a.room.room_name if a.room else None,
+            locked=a.locked,
+            locked_by=a.locked_by,
+            locked_at=a.locked_at,
         )
         for a, ts in raw_assignments
     ]
@@ -274,6 +279,9 @@ def get_proposal(
             subject_name=a.course_instance.subject.name if a.course_instance and a.course_instance.subject else None,
             subject_code=a.course_instance.subject.code if a.course_instance and a.course_instance.subject else None,
             room_name=a.room.room_name if a.room else None,
+            locked=a.locked,
+            locked_by=a.locked_by,
+            locked_at=a.locked_at,
         )
         for a, ts in raw_assignments
     ]
@@ -376,6 +384,18 @@ def move_assignment(
     ).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
+
+    # Lock guard: locked assignments are protected from accidental moves.
+    # Admin must explicitly unlock first. The friendly message guides them
+    # to the unlock action in the UI.
+    if assignment.locked:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This assignment is locked. Click the lock icon on the assignment "
+                "to unlock it first, then try moving again."
+            ),
+        )
 
     new_slot = db.query(TimeSlot).filter(TimeSlot.id == body.slot_id).first()
     if not new_slot:
@@ -560,6 +580,59 @@ def create_assignment(
     return get_proposal(proposal_id, db, admin)
 
 
+@router.put("/{proposal_id}/assignments/{assignment_id}/lock", response_model=ProposalDetail)
+def lock_assignment(
+    proposal_id: int,
+    assignment_id: int,
+    body: LockAssignment,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Toggle the lock state of an assignment.
+
+    Locking an assignment:
+      - Prevents the gap optimizer from swapping it during engine re-runs
+      - Prevents accidental admin moves (must explicitly unlock first)
+      - Carries the assignment forward when a new proposal is generated for
+        the same semester (inheritance from the most recent draft)
+
+    Idempotent: PUT { locked: true } twice is a no-op the second time. The
+    body specifies target state, not action, so the frontend can blindly
+    send `{ locked: !current }` without branching.
+
+    `locked_by` and `locked_at` are populated for audit. Any admin can
+    lock/unlock any assignment (no cross-admin gating); the audit columns
+    just record who did what when.
+    """
+    proposal = db.query(ScheduleProposal).filter(ScheduleProposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if proposal.status == ProposalStatus.approved:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot change lock state on an approved proposal.",
+        )
+
+    assignment = db.query(ScheduleAssignment).filter(
+        ScheduleAssignment.id == assignment_id,
+        ScheduleAssignment.proposal_id == proposal_id,
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if body.locked:
+        assignment.locked = True
+        assignment.locked_by = admin.id
+        assignment.locked_at = datetime.utcnow()
+    else:
+        assignment.locked = False
+        assignment.locked_by = None
+        assignment.locked_at = None
+
+    db.commit()
+    return get_proposal(proposal_id, db, admin)
+
+
 @router.post("/{proposal_id}/clone", response_model=ProposalResponse)
 def clone_proposal(
     proposal_id: int,
@@ -591,6 +664,12 @@ def clone_proposal(
             room_id=a.room_id,
             week_rotation=a.week_rotation,
             status=AssignmentStatus.proposed,
+            # Preserve lock state on clones. If the admin locked an assignment
+            # in the original, they expect that decision to survive the clone -
+            # otherwise cloning would silently strip their work.
+            locked=a.locked,
+            locked_by=a.locked_by,
+            locked_at=a.locked_at,
         ))
 
     original_conflicts = db.query(ConflictLog).filter(

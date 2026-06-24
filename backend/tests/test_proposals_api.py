@@ -614,3 +614,199 @@ def test_create_clears_stale_double_book_conflicts(client, seed):
         ConflictLog.conflict_type == "instructor_double_booked",
     ).count()
     assert remaining == 0
+
+# ---------- Phase 3: lock endpoint ----------
+
+def _place_and_get_assignment_id(client, seed, slot_index=0, week_rotation=None):
+    """Helper: create one assignment and return its id."""
+    kwargs = {
+        "course_instance_id": seed["course_instance"].id,
+        "slot_id": seed["slots"][slot_index].id,
+    }
+    if week_rotation:
+        kwargs["week_rotation"] = week_rotation
+    r = _post_assignment(client, seed["proposal"].id, **kwargs)
+    assert r.status_code == 200, r.text
+    return r.json()["assignments"][0]["id"]
+
+
+def test_lock_assignment_success(client, seed):
+    """PUT { locked: true } sets locked=True and stamps locked_by + locked_at."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r.status_code == 200, r.text
+
+    assignments = r.json()["assignments"]
+    locked_assignment = next(a for a in assignments if a["id"] == aid)
+    assert locked_assignment["locked"] is True
+    assert locked_assignment["locked_by"] is not None
+    assert locked_assignment["locked_at"] is not None
+
+
+def test_unlock_assignment_success(client, seed):
+    """PUT { locked: false } clears locked_by and locked_at back to None."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    # Lock first
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r.status_code == 200
+
+    # Unlock
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": False},
+    )
+    assert r.status_code == 200, r.text
+
+    locked_assignment = next(a for a in r.json()["assignments"] if a["id"] == aid)
+    assert locked_assignment["locked"] is False
+    assert locked_assignment["locked_by"] is None
+    assert locked_assignment["locked_at"] is None
+
+
+def test_lock_endpoint_idempotent(client, seed):
+    """Calling lock twice with same value is a no-op success the second time."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    r1 = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r1.status_code == 200
+
+    r2 = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r2.status_code == 200
+
+    second_state = next(a for a in r2.json()["assignments"] if a["id"] == aid)
+    assert second_state["locked"] is True
+    assert second_state["locked_by"] is not None
+
+
+def test_lock_rejected_when_proposal_approved(client, seed):
+    """Approved proposals are immutable - lock endpoint must refuse."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    seed["proposal"].status = ProposalStatus.approved
+    seed["db"].commit()
+
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r.status_code == 400
+    assert "approved" in r.json()["detail"].lower()
+
+
+def test_lock_rejected_when_assignment_not_in_proposal(client, seed):
+    """Mismatched proposal_id/assignment_id returns 404 (no silent crosstalk)."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    # Create a second proposal, route the lock call through THAT proposal_id
+    other_proposal = ScheduleProposal(
+        semester="2024-1",
+        status=ProposalStatus.draft,
+        created_by=1,
+        notes="other",
+    )
+    seed["db"].add(other_proposal)
+    seed["db"].commit()
+    seed["db"].refresh(other_proposal)
+
+    r = client.put(
+        f"/proposals/{other_proposal.id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r.status_code == 404
+
+
+def test_locked_assignment_cannot_be_moved(client, seed):
+    """A locked assignment refuses move with friendly 'unlock first' message."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    # Lock it
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r.status_code == 200
+
+    # Try to move - should fail with 400 and helpful message
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}",
+        json={"slot_id": seed["slots"][5].id},
+    )
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"].lower()
+    assert "locked" in detail
+    assert "unlock" in detail
+
+
+def test_lock_state_preserved_by_clone_proposal(client, seed):
+    """Cloning a proposal preserves locked state, locked_by, locked_at."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    # Lock the assignment
+    r = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+    assert r.status_code == 200
+    original_locked_by = next(a for a in r.json()["assignments"] if a["id"] == aid)["locked_by"]
+
+    # Clone the proposal
+    r = client.post(f"/proposals/{seed['proposal'].id}/clone")
+    assert r.status_code == 200, r.text
+    clone_id = r.json()["id"]
+
+    # Fetch the clone and verify lock state was carried over
+    r = client.get(f"/proposals/{clone_id}")
+    assert r.status_code == 200
+    clone_assignments = r.json()["assignments"]
+    assert len(clone_assignments) == 1
+    cloned = clone_assignments[0]
+    assert cloned["locked"] is True
+    assert cloned["locked_by"] == original_locked_by
+    assert cloned["locked_at"] is not None
+
+
+def test_place_then_lock_then_move_blocked(client, seed):
+    """Full sequence: create → lock → move blocked → unlock → move succeeds."""
+    aid = _place_and_get_assignment_id(client, seed)
+
+    # Lock
+    client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": True},
+    )
+
+    # Move blocked
+    r_blocked = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}",
+        json={"slot_id": seed["slots"][5].id},
+    )
+    assert r_blocked.status_code == 400
+
+    # Unlock
+    client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}/lock",
+        json={"locked": False},
+    )
+
+    # Move now succeeds
+    r_ok = client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid}",
+        json={"slot_id": seed["slots"][5].id},
+    )
+    assert r_ok.status_code == 200, r_ok.text
+    moved = next(a for a in r_ok.json()["assignments"] if a["id"] == aid)
+    assert moved["slot_id"] == seed["slots"][5].id
