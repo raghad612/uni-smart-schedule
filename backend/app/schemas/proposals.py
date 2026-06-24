@@ -29,6 +29,11 @@ class AssignmentResponse(BaseModel):
     subject_name: Optional[str] = None
     subject_code: Optional[str] = None
     room_name: Optional[str] = None
+    # Lock state - drives the amber styling + lock icon in the frontend, and
+    # the optimizer-skip / move-rejection / carry-forward behavior on backend.
+    locked: bool = False
+    locked_by: Optional[int] = None
+    locked_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
@@ -75,3 +80,10 @@ class CreateAssignment(BaseModel):
     slot_id: int
     room_id: Optional[int] = None
     week_rotation: WeekRotation = WeekRotation.ALWAYS
+
+
+class LockAssignment(BaseModel):
+    """Toggle the lock state of an assignment. Body specifies target state
+    (not action), making the endpoint idempotent: PUT { locked: true } twice
+    is a no-op the second time."""
+    locked: bool
