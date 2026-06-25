@@ -132,21 +132,37 @@ export function useAdminDashboard() {
       section_id: selectedSectionId,
     }),
     onSuccess: (res) => {
-      const { proposal_id, assignments_count, conflicts_count, validation_errors, section_label } = res.data;
+      const {
+        proposal_id, assignments_count, conflicts_count,
+        validation_errors, section_label,
+        inherited_locks_count, inherited_locks_invalid_count,
+      } = res.data;
       setActiveProposal(proposal_id);
       queryClient.invalidateQueries({ queryKey: ['proposals-list'] });
       queryClient.invalidateQueries({ queryKey: ['all-availability'] });
+      // Phase 3: locked-summary cache is stale now because the previous
+      // draft just got superseded by a new one. Refetch so the panel
+      // updates immediately.
+      queryClient.invalidateQueries({ queryKey: ['locked-summary'] });
 
       const sectionNote = section_label ? ` for ${section_label}` : '';
       const conflictNote = conflicts_count > 0 ? ` · ${conflicts_count} conflict${conflicts_count > 1 ? 's' : ''} logged` : '';
       const warningNote = validation_errors?.length
         ? ` · ${validation_errors.length} instructor${validation_errors.length > 1 ? 's' : ''} had missing availability`
         : '';
+      // Phase 3: surface inheritance result so admin knows their locked
+      // work carried over (and whether any locks had to be dropped).
+      const lockNote = inherited_locks_count > 0
+        ? ` · ${inherited_locks_count} lock${inherited_locks_count > 1 ? 's' : ''} carried forward`
+        : '';
+      const invalidLockNote = inherited_locks_invalid_count > 0
+        ? ` · ${inherited_locks_invalid_count} lock${inherited_locks_invalid_count > 1 ? 's' : ''} couldn't be carried (see conflicts)`
+        : '';
 
       if (assignments_count === 0) {
         toast.error(`Engine ran but placed 0 classes${sectionNote}. Check that instructors submitted availability.`, { duration: 7000 });
       } else {
-        toast.success(`${assignments_count} classes placed${sectionNote}${conflictNote}${warningNote}.`, { duration: 5000 });
+        toast.success(`${assignments_count} classes placed${sectionNote}${lockNote}${invalidLockNote}${conflictNote}${warningNote}.`, { duration: 6000 });
       }
     },
     onError: (e) => {
