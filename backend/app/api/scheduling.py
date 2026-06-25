@@ -57,7 +57,7 @@ def run_scheduling_engine(
         if not section:
             raise HTTPException(status_code=404, detail=f"Section {body.section_id} not found")
         course_instances = [ci for ci in course_instances if ci.section_id == body.section_id]
-        section_label = f"Year {section.year_level} {section.language} ({section.group_label})"
+        section_label = f"Year {section.year_level} {section.language.value} ({section.group_label})"
 
     if not course_instances:
         raise HTTPException(
