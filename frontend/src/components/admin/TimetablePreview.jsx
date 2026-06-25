@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 
 const slotDetails = {
   1: { label: 'Session 1', time: '08:00–09:40', period: 'morning' },
@@ -226,12 +227,19 @@ export default function TimetablePreview({
                         );
                         const hasConflict = conflictSlotIds.has(slotId);
 
+                       // Any locked assignment in the cell flips the whole
+                        // card to amber so admins spot locks at a glance.
+                        // Conflicts still win the visual battle (red > amber)
+                        // because conflicts are urgent.
+                        const hasLock = cellAssignments.some(a => a.locked);
                         return (
                           <td key={dayIdx} className="min-w-[130px] align-top">
                             {cellAssignments.length > 0 ? (
                               <div className={`p-3 rounded-2xl border transition-all ${
                                 hasConflict
                                   ? 'bg-red-500/15 border-red-500/40 hover:bg-red-500/25'
+                                  : hasLock
+                                  ? 'bg-amber-500/10 border-amber-500/40 hover:bg-amber-500/20'
                                   : 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'
                               }`}>
                                 {hasConflict && (
@@ -242,12 +250,34 @@ export default function TimetablePreview({
                                 {cellAssignments.map((assignment, idx) => {
                                   const rotation = assignment.week_rotation;
                                   const showBadge = rotation === 'WEEK_A' || rotation === 'WEEK_B';
+                                  const isLocked = !!assignment.locked;
                                   return (
                                     <div
                                       key={assignment.id ?? idx}
                                       className={idx > 0 ? 'mt-2 pt-2 border-t border-white/10' : ''}
                                     >
-                                      {showBadge && (
+                                      <div className="flex items-center gap-1 mb-1">
+                                        {showBadge && (
+                                          <span className={`inline-block text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${
+                                            rotation === 'WEEK_A'
+                                              ? 'bg-indigo-500/20 text-indigo-300'
+                                              : 'bg-pink-500/20 text-pink-300'
+                                          }`}>
+                                            {rotation === 'WEEK_A' ? 'Week A' : 'Week B'}
+                                          </span>
+                                        )}
+                                        {isLocked && (
+                                          <span
+                                            title="This assignment is locked and will carry over to future schedules."
+                                            className="inline-flex items-center gap-1 text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                                          >
+                                            <Lock className="w-2.5 h-2.5" />
+                                            Locked
+                                          </span>
+                                        )}
+                                      </div>
+                                      {/* Original Week A/B div was here - now consolidated above */}
+                                      {false && showBadge && (
                                         <div className={`inline-block text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded mb-1 ${
                                           rotation === 'WEEK_A'
                                             ? 'bg-indigo-500/20 text-indigo-300'

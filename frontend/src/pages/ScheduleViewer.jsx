@@ -1,11 +1,14 @@
-// Schedule viewer with manual slot swapping
+// Schedule viewer with manual slot swapping + lock toggles
 // Click a filled cell to select it (yellow), click another cell to move it there
-// Calls PUT /proposals/{id}/assignments/{assignment_id} with new slot_id
+// Click the lock icon on an assignment to protect it from the gap optimizer
+// and from being accidentally moved. Locked assignments are carried forward
+// when the engine generates a new proposal for the same semester.
 
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Lock, Unlock } from 'lucide-react';
 import api from '../utils/api';
 import { removeToken } from '../utils/auth';
 import AdminNavbar from '../components/admin/AdminNavbar';
@@ -128,6 +131,27 @@ export default function ScheduleViewer() {
     },
   });
 
+  // Lock/unlock an assignment. Body specifies the target state, so the same
+  // mutation handles both directions. On success we replace the cached
+  // ProposalDetail with the response so the UI updates instantly without a
+  // round-trip refetch.
+  const lockMutation = useMutation({
+    mutationFn: ({ assignmentId, locked }) =>
+      api.put(`/proposals/${proposalId}/assignments/${assignmentId}/lock`, { locked }),
+    onSuccess: (res, variables) => {
+      toast.success(
+        variables.locked
+          ? 'Assignment locked. It will carry over to future schedules.'
+          : 'Assignment unlocked.'
+      );
+      queryClient.setQueryData(['proposal', proposalId], res.data);
+    },
+    onError: (e) => {
+      const detail = e.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to toggle lock.', { duration: 5000 });
+    },
+  });
+
   const cloneMutation = useMutation({
     mutationFn: () => api.post(`/proposals/${proposalId}/clone`),
     onSuccess: (res) => {
@@ -179,6 +203,17 @@ const getAssignments = (slotId) => {
 
   const handleCellClick = (slotId, assignment) => {
     if (isApproved) return;
+
+    // Lock guard: don't let a locked card enter move mode. The lock icon
+    // on the card is the only way to unlock; clicking the body of a locked
+    // card just nudges the admin toward that icon.
+    if (assignment?.locked && !selectedAssignment && !pendingPlacement) {
+      toast(
+        'This assignment is locked. Click the lock icon on the card to unlock first.',
+        { icon: '🔒', duration: 3500 }
+      );
+      return;
+    }
 
     // Mode 1: placing a missing session
     if (pendingPlacement) {
@@ -478,6 +513,7 @@ const getAssignments = (slotId) => {
                             <div className="space-y-2 print:space-y-0">
                               {items.map((a) => {
                                 const isSelected = selectedAssignment?.id === a.id;
+                                const isLocked = !!a.locked;
                                 const rotation = a.week_rotation;
                                 const showBadge = rotation === 'WEEK_A' || rotation === 'WEEK_B';
                                 return (
@@ -489,6 +525,8 @@ const getAssignments = (slotId) => {
                                         ? 'bg-yellow-500/20 border-yellow-500/60 shadow-lg shadow-yellow-500/20 scale-105'
                                         : hasConflict
                                         ? 'bg-red-500/10 border-red-500/30 hover:border-red-500/60'
+                                        : isLocked
+                                        ? 'bg-amber-500/10 border-amber-500/40 hover:border-amber-500/60 shadow-md shadow-amber-500/10'
                                         : isApproved
                                         ? 'bg-white/[0.03] border-white/10 cursor-default'
                                         : 'bg-white/[0.03] border-white/10 hover:border-blue-500/40 hover:bg-blue-500/[0.04]'
@@ -508,10 +546,37 @@ const getAssignments = (slotId) => {
                                             {rotation === 'WEEK_A' ? 'Week A' : 'Week B'}
                                           </span>
                                         )}
+                                        {isLocked && (
+                                          <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-lg uppercase border border-amber-500/30">
+                                            Locked
+                                          </span>
+                                        )}
                                       </div>
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center gap-1.5">
                                         {hasConflict && <span className="text-xs">⚠️</span>}
                                         {isSelected && <span className="text-xs">✋</span>}
+                                        {!isApproved && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              lockMutation.mutate({ assignmentId: a.id, locked: !isLocked });
+                                            }}
+                                            disabled={lockMutation.isPending}
+                                            title={
+                                              isLocked
+                                                ? 'Locked — protected from the gap optimizer and carried over to new schedules. Click to unlock.'
+                                                : 'Click to lock. Locked assignments are protected from the gap optimizer, cannot be moved by accident, and carry over when you re-generate the schedule.'
+                                            }
+                                            className={`p-1 rounded-md border transition-all disabled:opacity-50 ${
+                                              isLocked
+                                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
+                                                : 'bg-white/[0.03] border-white/10 text-white/40 hover:bg-white/10 hover:text-white/80'
+                                            }`}
+                                          >
+                                            {isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
 
