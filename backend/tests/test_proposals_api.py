@@ -810,3 +810,95 @@ def test_place_then_lock_then_move_blocked(client, seed):
     assert r_ok.status_code == 200, r_ok.text
     moved = next(a for a in r_ok.json()["assignments"] if a["id"] == aid)
     assert moved["slot_id"] == seed["slots"][5].id
+
+    # ---------- Phase 3: locked-summary endpoint ----------
+
+def test_locked_summary_no_drafts_returns_zero(client, seed):
+    """No drafts → empty summary, locked_count=0, most_recent_draft_id=None."""
+    # Reject the seed draft to remove it from the draft pool
+    seed["proposal"].status = ProposalStatus.rejected
+    seed["db"].commit()
+
+    r = client.get(f"/proposals/locked-summary?semester={seed['proposal'].semester}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["locked_count"] == 0
+    assert body["most_recent_draft_id"] is None
+    assert body["total_draft_count"] == 0
+
+
+def test_locked_summary_draft_with_no_locks_returns_zero_count(client, seed):
+    """Draft exists but has no locked assignments → count=0 but the draft IS
+    surfaced (so the frontend knows there's a draft, just no locks)."""
+    r = client.get(f"/proposals/locked-summary?semester={seed['proposal'].semester}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["locked_count"] == 0
+    assert body["most_recent_draft_id"] == seed["proposal"].id
+    assert body["total_draft_count"] == 1
+
+
+def test_locked_summary_counts_locked_assignments(client, seed):
+    """Lock two assignments, expect locked_count=2."""
+    # Place first session at slot 0
+    r1 = _post_assignment(
+        client, seed["proposal"].id,
+        course_instance_id=seed["course_instance"].id,
+        slot_id=seed["slots"][0].id,
+    )
+    aid1 = next(
+        a["id"] for a in r1.json()["assignments"]
+        if a["slot_id"] == seed["slots"][0].id
+    )
+    # Place second session at slot 5
+    r2 = _post_assignment(
+        client, seed["proposal"].id,
+        course_instance_id=seed["course_instance"].id,
+        slot_id=seed["slots"][5].id,
+    )
+    aid2 = next(
+        a["id"] for a in r2.json()["assignments"]
+        if a["slot_id"] == seed["slots"][5].id
+    )
+
+    client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid1}/lock",
+        json={"locked": True},
+    )
+    client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid2}/lock",
+        json={"locked": True},
+    )
+
+    r = client.get(f"/proposals/locked-summary?semester={seed['proposal'].semester}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["locked_count"] == 2
+    assert body["most_recent_draft_id"] == seed["proposal"].id
+
+
+def test_locked_summary_only_counts_most_recent_draft(client, seed):
+    """If multiple drafts exist, summary only counts locks in the most recent."""
+    # Lock a session in the seeded (older) draft
+    aid_old = _place_and_get_assignment_id(client, seed)
+    client.put(
+        f"/proposals/{seed['proposal'].id}/assignments/{aid_old}/lock",
+        json={"locked": True},
+    )
+
+    # Create a newer empty draft for the same semester
+    newer = ScheduleProposal(
+        semester=seed["proposal"].semester,
+        status=ProposalStatus.draft,
+        created_by=1,
+        notes="newer empty draft",
+    )
+    seed["db"].add(newer)
+    seed["db"].commit()
+
+    r = client.get(f"/proposals/locked-summary?semester={seed['proposal'].semester}")
+    body = r.json()
+    # Should reflect the newer (empty) draft, not the older one with the lock
+    assert body["most_recent_draft_id"] == newer.id
+    assert body["locked_count"] == 0
+    assert body["total_draft_count"] == 2

@@ -27,8 +27,8 @@ from app.schemas.proposals import (
     MoveAssignment,
     CreateAssignment,
     LockAssignment,
-)
-
+    LockedSummaryResponse,
+) 
 router = APIRouter()
 conflicts_router = APIRouter()
 
@@ -237,6 +237,57 @@ def get_approved_proposal(
         created_at=proposal.created_at,
         assignments=assignments,
         conflicts=[],
+    )
+
+
+@router.get("/locked-summary", response_model=LockedSummaryResponse)
+def get_locked_summary(
+    semester: str = Query(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Return a one-card summary for the dashboard: which draft (if any) currently
+    holds locks that would carry forward on the next engine run, and how many.
+
+    Route registered BEFORE /{proposal_id} so FastAPI doesn't try to interpret
+    "locked-summary" as an integer proposal id.
+    """
+    drafts = (
+        db.query(ScheduleProposal)
+        .filter(
+            ScheduleProposal.semester == semester,
+            ScheduleProposal.status == ProposalStatus.draft,
+        )
+        .order_by(ScheduleProposal.created_at.desc(), ScheduleProposal.id.desc())
+        .all()
+    )
+
+    if not drafts:
+        return LockedSummaryResponse(
+            semester=semester,
+            most_recent_draft_id=None,
+            most_recent_draft_created_at=None,
+            locked_count=0,
+            total_draft_count=0,
+        )
+
+    most_recent = drafts[0]
+    locked_count = (
+        db.query(ScheduleAssignment)
+        .filter(
+            ScheduleAssignment.proposal_id == most_recent.id,
+            ScheduleAssignment.locked == True,  # noqa: E712
+        )
+        .count()
+    )
+
+    return LockedSummaryResponse(
+        semester=semester,
+        most_recent_draft_id=most_recent.id,
+        most_recent_draft_created_at=most_recent.created_at,
+        locked_count=locked_count,
+        total_draft_count=len(drafts),
     )
 
 
