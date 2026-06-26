@@ -8,13 +8,21 @@ import { Modal, FormField, inputClass, selectClass, getErrorMessage } from './sh
 export default function InstructorsTab() {
   const qc = useQueryClient();
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({
-    name: '', type: 'FULL_TIME', required_sessions: 1, max_sessions_per_day: 2, user_id: ''
+   const [form, setForm] = useState({
+    name: '', type: 'FULL_TIME', user_id: ''
   });
 
-  const { data: instructors = [], isLoading } = useQuery({
+const { data: instructors = [], isLoading } = useQuery({
     queryKey: ['instructors'],
     queryFn: () => api.get('/instructors/').then(r => r.data),
+  });
+
+  // Includes deactivated instructors too — needed to correctly grey out
+  // user accounts that are already linked (even to an inactive profile),
+  // since the DB only allows one instructor row per user_id.
+  const { data: allInstructors = [] } = useQuery({
+    queryKey: ['instructors', 'all'],
+    queryFn: () => api.get('/instructors/?include_inactive=true').then(r => r.data),
   });
 
   const { data: users = [] } = useQuery({
@@ -40,27 +48,23 @@ export default function InstructorsTab() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
-  const openAdd = () => {
-    setForm({ name: '', type: 'FULL_TIME', required_sessions: 1, max_sessions_per_day: 2, user_id: '' });
+ const openAdd = () => {
+    setForm({ name: '', type: 'FULL_TIME', user_id: '' });
     setModal('add');
   };
 
-  const openEdit = (i) => {
+const openEdit = (i) => {
     setForm({
       name: i.name, type: i.type,
-      required_sessions: i.required_sessions,
-      max_sessions_per_day: i.max_sessions_per_day,
       user_id: i.user_id || ''
     });
     setModal(i);
   };
 
-  const handleSubmit = () => {
+const handleSubmit = () => {
     const payload = {
       name: form.name,
       type: form.type,
-      required_sessions: parseInt(form.required_sessions),
-      max_sessions_per_day: parseInt(form.max_sessions_per_day),
       user_id: form.user_id ? parseInt(form.user_id) : null,
     };
     if (modal === 'add') createMutation.mutate(payload);
@@ -80,10 +84,10 @@ export default function InstructorsTab() {
         {isLoading && <p className="text-white/30 text-sm animate-pulse">Loading...</p>}
         {instructors.map(i => (
           <div key={i.id} className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5">
-            <div>
+         <div>
               <p className="font-bold capitalize">{i.name}</p>
               <p className="text-[11px] text-white/30 uppercase">
-                {i.type} · {i.required_sessions} sessions/week · max {i.max_sessions_per_day}/day
+                {i.type}
               </p>
             </div>
             <div className="flex gap-2">
@@ -111,20 +115,7 @@ export default function InstructorsTab() {
                 <option value="PART_TIME">Part Time</option>
               </select>
             </FormField>
-            <div className="grid grid-cols-2 gap-4">
-              <FormField label="Required Sessions / Week">
-                <input
-                  type="number" className={inputClass} value={form.required_sessions}
-                  onChange={e => setForm(p => ({ ...p, required_sessions: e.target.value }))} min={1}
-                />
-              </FormField>
-              <FormField label="Max Sessions / Day">
-                <input
-                  type="number" className={inputClass} value={form.max_sessions_per_day}
-                  onChange={e => setForm(p => ({ ...p, max_sessions_per_day: e.target.value }))} min={1}
-                />
-              </FormField>
-            </div>
+            
             <FormField label="Link to User Account (optional)">
               <select
                 className={selectClass}
@@ -132,14 +123,19 @@ export default function InstructorsTab() {
                 onChange={e => setForm(p => ({ ...p, user_id: e.target.value }))}
               >
                 <option value="">— Select user —</option>
-                {users.filter(u => u.role === 'INSTRUCTOR').map(u => {
-                  // Grey out accounts already linked to a different instructor
-                  const alreadyLinked = instructors.some(
+           {users.filter(u => u.role === 'INSTRUCTOR').map(u => {
+                  // Grey out accounts already linked to ANY instructor profile
+                  // (active or deactivated) — the DB allows only one per user.
+                  const linkedTo = allInstructors.find(
                     i => i.user_id === u.id && i.id !== (modal === 'add' ? null : modal?.id)
                   );
+                  const alreadyLinked = !!linkedTo;
+                  const label = linkedTo && !linkedTo.is_active
+                    ? ' (linked to deactivated instructor)'
+                    : alreadyLinked ? ' (already linked)' : '';
                   return (
                     <option key={u.id} value={u.id} disabled={alreadyLinked}>
-                      {u.email}{alreadyLinked ? ' (already linked)' : ''}
+                      {u.email}{label}
                     </option>
                   );
                 })}

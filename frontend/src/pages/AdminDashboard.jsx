@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 // import { removeToken } from '../utils/auth';
 import { useAdminDashboard } from '../hooks/useAdminDashboard';
@@ -6,7 +8,10 @@ import StatCard from '../components/admin/StatCard';
 import AvailabilityModal from '../components/admin/AvailabilityModal';
 import InstructorStatusPanel from '../components/admin/InstructorStatusPanel';
 import TimetablePreview from '../components/admin/TimetablePreview';
+import LockedSummaryPanel from '../components/admin/LockedSummaryPanel';
+import GenerateConfirmModal from '../components/admin/GenerateConfirmModal';
 import Footer from '../components/Footer';
+import api from '../utils/api';
 
 const LANG_COLOR = {
   ENGLISH: { bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.3)', text: '#60a5fa' },
@@ -39,12 +44,40 @@ export default function AdminDashboard() {
     rejectMutation,
   } = useAdminDashboard();
 
-  // const handleLogout = () => { removeToken(); navigate('/login'); };
+ // const handleLogout = () => { removeToken(); navigate('/login'); };
   const selectedSection = sections.find(s => s.id === selectedSectionId);
 
   const sortedSections = sections
     .slice()
     .sort((a, b) => a.year_level - b.year_level || a.language.localeCompare(b.language));
+
+  // ── Phase 3: locked-summary fetch + confirmation modal ────────────────────
+  // Polls the backend for locks in the most recent draft for this semester.
+  // Result is used in two places: (1) the LockedSummaryPanel above the
+  // Generate button, and (2) the click handler below, which intercepts
+  // Generate to show a confirmation modal when locks are present.
+  const { data: lockedSummary } = useQuery({
+    queryKey: ['locked-summary', semester],
+    queryFn: () =>
+      api.get(`/proposals/locked-summary?semester=${semester}`).then(r => r.data),
+    enabled: !!semester,
+    refetchOnWindowFocus: true,
+  });
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const handleGenerateClick = () => {
+    if (lockedSummary && lockedSummary.locked_count > 0) {
+      setConfirmOpen(true);
+    } else {
+      runMutation.mutate();
+    }
+  };
+
+  const handleConfirmGenerate = () => {
+    setConfirmOpen(false);
+    runMutation.mutate();
+  };
 
   return (
     <div className="min-h-screen bg-[#070d1a] text-white">
@@ -56,6 +89,16 @@ export default function AdminDashboard() {
           onClose={() => setSelectedInstructor(null)}
         />
       )}
+
+      <GenerateConfirmModal
+        open={confirmOpen}
+        lockedCount={lockedSummary?.locked_count || 0}
+        draftId={lockedSummary?.most_recent_draft_id}
+        semester={semester}
+        onConfirm={handleConfirmGenerate}
+        onCancel={() => setConfirmOpen(false)}
+        isPending={runMutation.isPending}
+      />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
 
@@ -153,15 +196,19 @@ export default function AdminDashboard() {
               <h2 className="text-xs font-black uppercase tracking-widest text-white/30 mb-4">
                 Step 2 — Generate Schedule
               </h2>
-              <div className="space-y-3">
+             <div className="space-y-3">
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none h-16 resize-none"
                   placeholder="Optional notes..."
                 />
+
+                {/* Phase 3: lock carry-forward summary - hidden when zero locks */}
+                <LockedSummaryPanel summary={lockedSummary} />
+
                 <button
-                  onClick={() => runMutation.mutate()}
+                  onClick={handleGenerateClick}
                   disabled={runMutation.isPending}
                   className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-30 py-4 rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all text-sm"
                 >

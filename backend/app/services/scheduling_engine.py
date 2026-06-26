@@ -1,3 +1,5 @@
+import math
+
 from sqlalchemy.orm import Session
 from app.models.instructor import Instructor
 from app.models.course_instance import CourseInstance
@@ -54,23 +56,194 @@ def load_committed_slots(db: Session, semester: str) -> tuple[dict, dict]:
     return instructor_committed, room_committed
 
 
+def load_inherited_locks(db: Session, semester: str) -> tuple[list, list, int | None]:
+    """
+    Phase 3 / Option B - lock carry-forward.
+
+    Find the MOST RECENT draft proposal for `semester` and pull its locked
+    assignments. Validate each one against current world state so we don't
+    inherit references to deleted courses, deactivated instructors, or
+    missing rooms.
+
+    Returns a 3-tuple:
+      valid_locks: list of dicts shaped like engine assignments, ready to be
+                   pre-placed before the greedy assignment loop runs. Each
+                   dict carries: course_instance_id, slot_id, room_id,
+                   instructor_id, week_rotation, locked=True, locked_by,
+                   locked_at, original_assignment_id (audit trail back to
+                   the source draft).
+      carry_errors: list of dicts shaped {"reason": str, "details": str,
+                    "course_instance_id": int|None, "instructor_id": int|None,
+                    "slot_id": int|None}. The scheduling endpoint surfaces
+                    these as `lock_carried_invalid` conflict_log rows in the
+                    new proposal so the admin sees what couldn't be carried
+                    over and why.
+      source_draft_id: id of the draft we inherited from, or None if no
+                      draft existed for this semester.
+
+    Notes:
+      - We only inherit from DRAFT proposals. Approved proposals are already
+        handled by load_committed_slots and are immutable, so their "locks"
+        are implicit.
+      - "Most recent" = highest created_at. The Phase 3 design decision was
+        to inherit from the most recent draft only (not the union of all
+        drafts), to avoid contradictions when multiple drafts have conflicting
+        locks for the same course.
+      - Validation drops locks whose course_instance, instructor, or room has
+        been deleted, or whose instructor was deactivated. Slots are never
+        validated because time_slots is seeded once and never mutated.
+    """
+    most_recent = (
+        db.query(ScheduleProposal)
+        .filter(
+            ScheduleProposal.semester == semester,
+            ScheduleProposal.status == ProposalStatus.draft,
+        )
+        .order_by(ScheduleProposal.created_at.desc(), ScheduleProposal.id.desc())
+        .first()
+    )
+
+    if not most_recent:
+        return [], [], None
+
+    locked_assignments = (
+        db.query(ScheduleAssignment)
+        .filter(
+            ScheduleAssignment.proposal_id == most_recent.id,
+            ScheduleAssignment.locked == True,  # noqa: E712 - SQLAlchemy needs ==, not `is`
+        )
+        .all()
+    )
+
+    valid_locks: list = []
+    carry_errors: list = []
+
+    for a in locked_assignments:
+        # Validate course_instance exists. If the admin deleted IN_EDGE_A
+        # from the catalog after locking it, the reference is dead.
+        ci = db.query(CourseInstance).filter(
+            CourseInstance.id == a.course_instance_id
+        ).first()
+        if ci is None:
+            carry_errors.append({
+                "reason": "course_deleted",
+                "details": (
+                    f"Locked assignment in Draft #{most_recent.id} pointed to a "
+                    f"course_instance that no longer exists. The lock was dropped "
+                    f"during schedule generation."
+                ),
+                "course_instance_id": a.course_instance_id,
+                "instructor_id": None,
+                "slot_id": a.slot_id,
+            })
+            continue
+
+        # Validate instructor exists AND is still active. A deactivated
+        # instructor shouldn't have new sessions scheduled, even if locked.
+        instructor = ci.instructor  # eager-loaded via relationship
+        if instructor is None:
+            carry_errors.append({
+                "reason": "instructor_deleted",
+                "details": (
+                    f"Locked assignment in Draft #{most_recent.id} pointed to an "
+                    f"instructor that no longer exists. The lock was dropped."
+                ),
+                "course_instance_id": ci.id,
+                "instructor_id": None,
+                "slot_id": a.slot_id,
+            })
+            continue
+        if not instructor.is_active:
+            carry_errors.append({
+                "reason": "instructor_inactive",
+                "details": (
+                    f"Locked assignment for {instructor.name.title()} in Draft "
+                    f"#{most_recent.id} was dropped because the instructor is no "
+                    f"longer active."
+                ),
+                "course_instance_id": ci.id,
+                "instructor_id": instructor.id,
+                "slot_id": a.slot_id,
+            })
+            continue
+
+        # Validate room exists.
+        if a.room_id is not None and a.room is None:
+            subject_code = ci.subject.code if ci.subject else f"course #{ci.id}"
+            carry_errors.append({
+                "reason": "room_deleted",
+                "details": (
+                    f"Locked assignment for {subject_code} in Draft "
+                    f"#{most_recent.id} pointed to a room that no longer exists. "
+                    f"The lock was dropped."
+                ),
+                "course_instance_id": ci.id,
+                "instructor_id": instructor.id,
+                "slot_id": a.slot_id,
+            })
+            continue
+
+        valid_locks.append({
+            "course_instance_id": a.course_instance_id,
+            "slot_id": a.slot_id,
+            "room_id": a.room_id,
+            "instructor_id": ci.instructor_id,
+            "week_rotation": a.week_rotation or WeekRotation.ALWAYS,
+            "locked": True,
+            "locked_by": a.locked_by,
+            "locked_at": a.locked_at,
+            # Audit pointer back to the source draft so future debugging
+            # (or a possible UI "show source" feature) can trace the
+            # provenance of a locked assignment.
+            "_inherited_from_proposal_id": most_recent.id,
+            "_inherited_from_assignment_id": a.id,
+        })
+
+    return valid_locks, carry_errors, most_recent.id
+
+
+def compute_required_sessions(course_instances: list) -> dict[int, int]:
+    """
+    Derives each instructor's required sessions/week from the courses they
+    teach this semester, instead of a manually-entered field.
+
+    For each course_instance, adds its subject's sessions_per_week (a float,
+    e.g. 3.5 for a course that meets 3 times every week + 1 time every other
+    week) to that instructor's running total. The totals are then rounded UP
+    (ceil) — a 3.5 total becomes 4, because the instructor still needs a
+    reserved slot every week for the biweekly session (it alternates
+    WEEK_A/WEEK_B in the same time slot).
+
+    Returns: {instructor_id: required_sessions_per_week (int)}
+    """
+    totals: dict[int, float] = {}
+    for ci in course_instances:
+        subject = ci.subject
+        if subject is None:
+            continue
+        totals[ci.instructor_id] = totals.get(ci.instructor_id, 0.0) + subject.sessions_per_week
+    return {instructor_id: math.ceil(total) for instructor_id, total in totals.items()}
+
+
 def validate_availability(
     instructors: list,
     availability: list,
     course_instances: list,
 ) -> list:
-    instructor_ids_with_courses = {ci.instructor_id for ci in course_instances}
+    required_sessions = compute_required_sessions(course_instances)
     errors = []
     for instructor in instructors:
-        if instructor.id not in instructor_ids_with_courses:
+        required = required_sessions.get(instructor.id)
+        if required is None:
+            # Instructor has no course_instances this semester — nothing to validate
             continue
         submitted = [
             a for a in availability
             if a.instructor_id == instructor.id
             and a.preference != AvailabilityPreference.BUSY
         ]
-        if len(submitted) < instructor.required_sessions:
-            missing = instructor.required_sessions - len(submitted)
+        if len(submitted) < required:
+            missing = required - len(submitted)
             errors.append({
                 "instructor_id": instructor.id,
                 "issue": f"missing {missing} slots"
@@ -78,10 +251,12 @@ def validate_availability(
     return errors
 
 
-def sort_instructors(instructors: list) -> list:
+def sort_instructors(instructors: list, course_instances: list) -> list:
+    required_sessions = compute_required_sessions(course_instances)
+
     def sort_key(inst):
         type_order = 0 if inst.type == InstructorType.PART_TIME else 1
-        return (type_order, -inst.required_sessions)
+        return (type_order, -required_sessions.get(inst.id, 0))
     return sorted(instructors, key=sort_key)
 
 
@@ -89,19 +264,69 @@ def assign_slots(
     sorted_instructors: list,
     course_instances: list,
     availability: list,
+    time_slots: list = None,
     instructor_committed: dict = None,
     room_committed: dict = None,
+    max_sessions_per_day: int = 2,
+    inherited_locks: list = None,
 ) -> tuple[list, list]:
+    """
+    Greedy slot assignment.
+
+    Phase 3 / Option B addition - `inherited_locks`:
+        A list of pre-placed assignment dicts (typically from
+        load_inherited_locks). These are treated as hard constraints:
+          - They appear in the output `assignments` list as-is, with their
+            `locked=True` flag preserved so save_proposal persists them.
+          - Their slots are pre-reserved in used_instructor_slots and
+            used_room_slots so the greedy loop never tries to overwrite
+            them.
+          - Each one decrements sessions_needed for its course_instance,
+            so a 2-sessions/week course with 1 inherited lock only gets
+            1 more session placed (not 2 → which would produce 3 total).
+    """
     if instructor_committed is None:
         instructor_committed = {}
     if room_committed is None:
         room_committed = {}
+    if time_slots is None:
+        time_slots = []
+    if inherited_locks is None:
+        inherited_locks = []
 
-    assignments = []
+    slot_day: dict[int, str] = {ts.id: ts.day for ts in time_slots}
+
+    # Start with inherited locks already in the output list. We make a list
+    # copy so callers can keep using their original reference safely.
+    assignments = list(inherited_locks)
     conflicts = []
 
-    used_instructor_slots: dict[int, set] = {}
-    used_room_slots: dict[int, set] = {}
+    # used_instructor_slots[instructor_id][slot_id] = list of rotations already placed there
+    used_instructor_slots: dict[int, dict[int, list]] = {}
+    used_room_slots: dict[int, dict[int, list]] = {}
+
+    # ---- Phase 3: pre-seed used_* and placed counts from inherited locks ----
+    placed_per_ci: dict[int, int] = {}
+    inherited_days_by_ci: dict[int, dict[str, int]] = {}
+    inherited_slots_by_ci: dict[int, set] = {}
+
+    for lock in inherited_locks:
+        instr_id = lock["instructor_id"]
+        slot_id = lock["slot_id"]
+        room_id = lock.get("room_id")
+        rotation = lock.get("week_rotation", WeekRotation.ALWAYS)
+        ci_id = lock["course_instance_id"]
+
+        used_instructor_slots.setdefault(instr_id, {}).setdefault(slot_id, []).append(rotation)
+        if room_id:
+            used_room_slots.setdefault(room_id, {}).setdefault(slot_id, []).append(rotation)
+
+        placed_per_ci[ci_id] = placed_per_ci.get(ci_id, 0) + 1
+        inherited_slots_by_ci.setdefault(ci_id, set()).add(slot_id)
+        day = slot_day.get(slot_id)
+        if day is not None:
+            inherited_days_by_ci.setdefault(ci_id, {})
+            inherited_days_by_ci[ci_id][day] = inherited_days_by_ci[ci_id].get(day, 0) + 1
 
     instructor_order = {inst.id: idx for idx, inst in enumerate(sorted_instructors)}
     sorted_instances = sorted(
@@ -113,6 +338,17 @@ def assign_slots(
     for a in availability:
         if a.preference != AvailabilityPreference.BUSY:
             avail_by_instructor.setdefault(a.instructor_id, []).append(a)
+
+    def slot_is_free(used_map, key, slot_id, rotation, committed_map, committed_key):
+        for existing_rotation in used_map.get(key, {}).get(slot_id, []):
+            if _rotations_overlap(existing_rotation, rotation):
+                return False
+        if committed_key is not None and slot_id in committed_map.get(committed_key, set()):
+            return False
+        return True
+
+    def mark_used(used_map, key, slot_id, rotation):
+        used_map.setdefault(key, {}).setdefault(slot_id, []).append(rotation)
 
     for ci in sorted_instances:
         instructor_avail = avail_by_instructor.get(ci.instructor_id, [])
@@ -130,54 +366,107 @@ def assign_slots(
         room_id = ci.section.default_room_id if ci.section else None
         instructor_id = ci.instructor_id
 
-        instr_blocked = instructor_committed.get(instructor_id, set())
-        room_blocked = room_committed.get(room_id, set()) if room_id else set()
+        sessions_per_week = ci.subject.sessions_per_week if ci.subject else 1.0
+        fixed_sessions = int(sessions_per_week)
+        has_alternating = (sessions_per_week - fixed_sessions) > 1e-9
+        sessions_needed = fixed_sessions + (1 if has_alternating else 0)
 
-        instr_used = used_instructor_slots.setdefault(instructor_id, set())
-        room_used = used_room_slots.setdefault(room_id, set()) if room_id else set()
+        # Phase 3: subtract whatever's already placed via inherited locks.
+        inherited_for_this_ci = [
+            l for l in inherited_locks if l["course_instance_id"] == ci.id
+        ]
+        inherited_always = sum(
+            1 for l in inherited_for_this_ci
+            if l.get("week_rotation", WeekRotation.ALWAYS) == WeekRotation.ALWAYS
+        )
+        inherited_alternating = len(inherited_for_this_ci) - inherited_always
 
-        assigned = False
-        for avail_row in candidates:
-            slot_id = avail_row.slot_id
+        fixed_sessions_to_place = max(0, fixed_sessions - inherited_always)
+        place_alternating = has_alternating and inherited_alternating == 0
 
-            if slot_id in instr_blocked:
-                continue
-            if room_id and slot_id in room_blocked:
-                continue
-            if slot_id in instr_used:
-                continue
-            if room_id and slot_id in room_used:
-                continue
+        used_slot_ids_this_ci: set = set(inherited_slots_by_ci.get(ci.id, set()))
+        used_days_this_ci: dict[str, int] = dict(inherited_days_by_ci.get(ci.id, {}))
+        placed = len(inherited_for_this_ci)
 
-            instr_used.add(slot_id)
-            if room_id:
-                room_used.add(slot_id)
-                used_room_slots[room_id] = room_used
+        def try_place(rotation, allow_repeat_day):
+            """
+            Tries to place one session. If allow_repeat_day is False, only
+            considers days this course hasn't used yet this week (spreads
+            sessions across different days). If True, also allows a day
+            already used, as long as it hasn't hit max_sessions_per_day yet
+            (fallback when there aren't enough distinct days available).
+            """
+            nonlocal placed
+            for avail_row in candidates:
+                slot_id = avail_row.slot_id
+                if slot_id in used_slot_ids_this_ci:
+                    continue
 
-            assignments.append({
-                "course_instance_id": ci.id,
-                "slot_id": slot_id,
-                "room_id": room_id,
-                "instructor_id": instructor_id,
-                "avail_id": avail_row.id,
-            })
-            assigned = True
-            break
+                day = slot_day.get(slot_id)
+                day_count = used_days_this_ci.get(day, 0) if day is not None else 0
+                if day is not None:
+                    if day_count >= max_sessions_per_day:
+                        continue
+                    if not allow_repeat_day and day_count > 0:
+                        continue
 
-        if not assigned:
-            reason = "No available slots submitted"
-            if instructor_avail:
-                reason = "All submitted slots are already taken by approved proposals or this run"
+                if not slot_is_free(used_instructor_slots, instructor_id, slot_id, rotation, instructor_committed, instructor_id):
+                    continue
+                if room_id and not slot_is_free(used_room_slots, room_id, slot_id, rotation, room_committed, room_id):
+                    continue
+
+                mark_used(used_instructor_slots, instructor_id, slot_id, rotation)
+                if room_id:
+                    mark_used(used_room_slots, room_id, slot_id, rotation)
+                used_slot_ids_this_ci.add(slot_id)
+                if day is not None:
+                    used_days_this_ci[day] = day_count + 1
+
+                assignments.append({
+                    "course_instance_id": ci.id,
+                    "slot_id": slot_id,
+                    "room_id": room_id,
+                    "instructor_id": instructor_id,
+                    "avail_id": avail_row.id,
+                    "week_rotation": rotation,
+                    # Engine-placed assignments are never born locked.
+                    "locked": False,
+                })
+                placed += 1
+                return True
+            return False
+
+        # Place the fixed (every-week) sessions first.
+        # Phase 3: fixed_sessions_to_place is fixed_sessions minus any
+        # ALWAYS sessions already inherited as locked from a previous draft.
+        for _ in range(fixed_sessions_to_place):
+            if not try_place(WeekRotation.ALWAYS, allow_repeat_day=False):
+                try_place(WeekRotation.ALWAYS, allow_repeat_day=True)
+
+        # Place the alternating session, if this course has one.
+        # Phase 3: skip if the alternating session was already inherited.
+        if place_alternating:
+            placed_alt = try_place(WeekRotation.WEEK_A, allow_repeat_day=False) or \
+                         try_place(WeekRotation.WEEK_A, allow_repeat_day=True)
+            if not placed_alt:
+                try_place(WeekRotation.WEEK_B, allow_repeat_day=False) or \
+                    try_place(WeekRotation.WEEK_B, allow_repeat_day=True)
+
+        if placed < sessions_needed:
+            missing = sessions_needed - placed
+            course_label = ci.subject.code if ci.subject else f"course_instance #{ci.id}"
             conflicts.append({
                 "course_instance_id": ci.id,
                 "instructor_id": instructor_id,
-                "conflict_type": "no_available_slot",
+                "conflict_type": "incomplete_assignment",
                 "slot_id": None,
-                "details": f"{reason} for course instance #{ci.id} (instructor_id={instructor_id})",
+                "details": (
+                    f"{course_label} needs {sessions_needed} session(s)/week, "
+                    f"but only {placed} could be scheduled ({missing} missing). "
+                    f"Assign the remaining session(s) manually."
+                ),
             })
-
     return assignments, conflicts
-
 
 def calculate_gap_score(assignments: list, time_slots: list) -> int:
     slot_info: dict[int, tuple[int, int]] = {}
@@ -232,6 +521,14 @@ def optimise_gaps(
                 if best[i]["instructor_id"] == best[j]["instructor_id"]:
                     continue
 
+                # Phase 3: locked assignments are off-limits to the optimizer.
+                # If EITHER side of a candidate swap is locked, skip - the
+                # admin's manual lock decision overrides the gap heuristic.
+                # Must be inside the inner pair loop so we still consider
+                # OTHER pairs that don't involve the locked assignment.
+                if best[i].get("locked") or best[j].get("locked"):
+                    continue
+
                 new_i_slot = best[j]["slot_id"]
                 new_j_slot = best[i]["slot_id"]
 
@@ -262,6 +559,43 @@ def optimise_gaps(
     return best
 
 
+def _rotations_overlap(rotation_a, rotation_b) -> bool:
+    """
+    Returns True if two assignments with these week_rotation values could
+    ever land on the same real-world week (i.e. would actually clash).
+
+    - ALWAYS happens every week, so it clashes with anything in the same slot.
+    - WEEK_A only clashes with ALWAYS or another WEEK_A.
+    - WEEK_B only clashes with ALWAYS or another WEEK_B.
+    - WEEK_A and WEEK_B never clash with each other - they alternate, so the
+      same slot/room/instructor can be shared by one WEEK_A course and one
+      WEEK_B course.
+    """
+    if rotation_a == WeekRotation.ALWAYS or rotation_b == WeekRotation.ALWAYS:
+        return True
+    return rotation_a == rotation_b
+
+
+def _find_overlapping(group: list) -> list:
+    """
+    Given a list of assignments that all share the same slot (and same
+    instructor, or same room), returns the subset that actually clash with
+    at least one other entry once week_rotation is taken into account.
+    Assignments without a "week_rotation" key are treated as ALWAYS.
+    """
+    overlapping = []
+    for i, a in enumerate(group):
+        rotation_a = a.get("week_rotation", WeekRotation.ALWAYS)
+        for j, b in enumerate(group):
+            if i == j:
+                continue
+            rotation_b = b.get("week_rotation", WeekRotation.ALWAYS)
+            if _rotations_overlap(rotation_a, rotation_b):
+                overlapping.append(a)
+                break
+    return overlapping
+
+
 def _has_conflict(
     assignments: list,
     instructor_committed: dict = None,
@@ -270,26 +604,35 @@ def _has_conflict(
     instructor_committed = instructor_committed or {}
     room_committed = room_committed or {}
 
-    instructor_slots: dict[int, set] = {}
-    room_slots: dict[int, set] = {}
+    instructor_slots: dict[tuple, list] = {}
+    room_slots: dict[tuple, list] = {}
 
     for a in assignments:
         slot_id = a["slot_id"]
         if slot_id is None:
             continue
+        rotation = a.get("week_rotation", WeekRotation.ALWAYS)
 
         instr = a["instructor_id"]
-        if slot_id in instructor_slots.setdefault(instr, set()):
-            return True
-        instructor_slots[instr].add(slot_id)
+        instr_key = (instr, slot_id)
+        for existing_rotation in instructor_slots.setdefault(instr_key, []):
+            if _rotations_overlap(existing_rotation, rotation):
+                return True
+        instructor_slots[instr_key].append(rotation)
+
+        # Approved-schedule slots remain conservatively blocked regardless of
+        # rotation (see Q4 - not yet rotation-aware).
         if slot_id in instructor_committed.get(instr, set()):
             return True
 
         room = a.get("room_id")
         if room:
-            if slot_id in room_slots.setdefault(room, set()):
-                return True
-            room_slots[room].add(slot_id)
+            room_key = (room, slot_id)
+            for existing_rotation in room_slots.setdefault(room_key, []):
+                if _rotations_overlap(existing_rotation, rotation):
+                    return True
+            room_slots[room_key].append(rotation)
+
             if slot_id in room_committed.get(room, set()):
                 return True
 
@@ -315,27 +658,28 @@ def detect_conflicts(assignments: list) -> list:
             room_slots.setdefault(room_key, []).append(a)
 
     for (instructor_id, slot_id), group in instructor_slots.items():
-        if len(group) > 1:
+        clashing = _find_overlapping(group)
+        if clashing:
             conflicts.append({
                 "slot_id": slot_id,
                 "conflict_type": "instructor_double_booked",
                 "instructor_id": instructor_id,
-                "course_instance_id": group[0]["course_instance_id"],
-                "details": f"Instructor {instructor_id} assigned {len(group)} times in slot {slot_id}",
+                "course_instance_id": clashing[0]["course_instance_id"],
+                "details": f"Instructor {instructor_id} has {len(clashing)} overlapping sessions in slot {slot_id}",
             })
 
     for (room_id, slot_id), group in room_slots.items():
-        if len(group) > 1:
+        clashing = _find_overlapping(group)
+        if clashing:
             conflicts.append({
                 "slot_id": slot_id,
                 "conflict_type": "room_double_booked",
-                "instructor_id": group[0]["instructor_id"],
-                "course_instance_id": group[0]["course_instance_id"],
-                "details": f"Room {room_id} assigned {len(group)} times in slot {slot_id}",
+                "instructor_id": clashing[0]["instructor_id"],
+                "course_instance_id": clashing[0]["course_instance_id"],
+                "details": f"Room {room_id} has {len(clashing)} overlapping sessions in slot {slot_id}",
             })
 
     return conflicts
-
 
 def save_proposal(
     db: Session,
@@ -360,8 +704,16 @@ def save_proposal(
             course_instance_id=a["course_instance_id"],
             slot_id=a["slot_id"],
             room_id=a.get("room_id"),
-            week_rotation=WeekRotation.ALWAYS,
+            week_rotation=a.get("week_rotation", WeekRotation.ALWAYS),
             status=AssignmentStatus.proposed,
+            # Phase 3: persist lock state. Engine-placed assignments come
+            # with locked=False by default. Inherited-and-carried locks come
+            # with locked=True and the original locked_by/locked_at preserved
+            # (so the audit trail points back to the same admin who originally
+            # locked it, not whoever ran the engine this time).
+            locked=a.get("locked", False),
+            locked_by=a.get("locked_by"),
+            locked_at=a.get("locked_at"),
         )
         db.add(row)
 

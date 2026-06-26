@@ -11,30 +11,29 @@ import AdminNavbar from '../components/admin/AdminNavbar';
 
 // Human-readable conflict type labels
 const CONFLICT_LABELS = {
-  no_available_slot: 'No Available Slot',
+  incomplete_assignment: 'Incomplete Schedule',
   instructor_double_booked: 'Instructor Double-Booked',
   room_double_booked: 'Room Double-Booked',
 };
 
 // Explanation of what each conflict type means
 const CONFLICT_EXPLANATIONS = {
-  no_available_slot: null, // handled dynamically below — see getNoSlotExplanation()
+  incomplete_assignment: null, // handled dynamically below — see getIncompleteExplanation()
   instructor_double_booked: 'This instructor was assigned to two different courses in the same time slot within this proposal.',
   room_double_booked: 'The same room was assigned to two different courses in the same time slot.',
 };
 
-// Smart message for no_available_slot based on whether the instructor submitted anything
-function getNoSlotExplanation(conflict) {
-  if (conflict.conflict_type !== 'no_available_slot') return null;
+// Smart message for incomplete_assignment - a course that needs N
+// sessions/week didn't get all N scheduled. The engine's `details` field
+// already explains the course code and how many are missing; this adds
+// guidance on what to do about it.
+function getIncompleteExplanation(conflict) {
+  if (conflict.conflict_type !== 'incomplete_assignment') return null;
   if (!conflict.instructor_name) {
     return 'Legacy conflict record — re-run the engine to see full details.';
   }
-  if (conflict.details && conflict.details.includes('No available slots submitted')) {
-    return `${conflict.instructor_name} has not submitted any availability for this semester. Ask them to log in and submit their availability slots before re-running the engine.`;
-  }
-  return `All availability slots submitted by ${conflict.instructor_name} were already taken by previously approved section schedules. Ask the instructor to log in and submit additional slots, then re-run the engine for this section.`;
+  return `${conflict.details || ''} Go to "View & Edit Schedule" and place the missing session(s) for ${conflict.instructor_name} in an open slot, or ask them to submit additional availability and re-run the engine.`;
 }
-
 export default function ConflictViewer() {
   const { proposalId } = useParams();
   const navigate = useNavigate();
@@ -182,18 +181,18 @@ export default function ConflictViewer() {
                           <p className="text-[9px] uppercase tracking-widest text-white/30 font-black mb-1">Time Slot</p>
                           <p className="text-sm font-bold text-white">{conflict.slot_label}</p>
                         </div>
-                      ) : conflict.conflict_type === 'no_available_slot' && (
+                      ) : conflict.conflict_type === 'incomplete_assignment' && (
                         <div className="bg-white/5 rounded-xl px-4 py-3">
-                          <p className="text-[9px] uppercase tracking-widest text-white/30 font-black mb-1">Time Slot</p>
-                          <p className="text-sm font-bold text-white/40 italic">Not assigned</p>
+                          <p className="text-[9px] uppercase tracking-widest text-white/30 font-black mb-1">Missing Session</p>
+                          <p className="text-sm font-bold text-white/40 italic">Not yet assigned</p>
                         </div>
                       )}
                     </div>
 
                     {/* Explanation */}
 {!isResolved && (() => {
-  const msg = conflict.conflict_type === 'no_available_slot'
-    ? getNoSlotExplanation(conflict)
+  const msg = conflict.conflict_type === 'incomplete_assignment'
+    ? getIncompleteExplanation(conflict)
     : CONFLICT_EXPLANATIONS[conflict.conflict_type];
   return msg ? (
     <div className="bg-yellow-500/5 border border-yellow-500/10 rounded-xl px-4 py-3 mb-4">

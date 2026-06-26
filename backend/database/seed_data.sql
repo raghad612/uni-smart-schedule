@@ -361,21 +361,13 @@ SELECT '=== INSTRUCTOR LOAD (2024-2) ===' as info;
 SELECT
   inst.name,
   inst.type,
-  inst.required_sessions,
+  CEIL(SUM(sub.sessions_per_week))::int as required_sessions,
   COUNT(ci.id) as course_instance_rows,
   STRING_AGG(DISTINCT sec.group_label, ', ' ORDER BY sec.group_label) as sections
 FROM instructors inst
 JOIN course_instances ci ON ci.instructor_id = inst.id
 JOIN sections sec ON ci.section_id = sec.id
-WHERE ci.semester = '2024-2'
-GROUP BY inst.id, inst.name, inst.type, inst.required_sessions
-ORDER BY inst.type, inst.required_sessions DESC;
-
-SELECT '=== WEEK_ROTATION TEST SUBJECTS (sessions_per_week=0.5) ===' as info;
-SELECT ci.id, sec.group_label, sub.code, sub.name, inst.name as instructor
-FROM course_instances ci
-JOIN sections sec ON ci.section_id = sec.id
 JOIN subjects sub ON ci.subject_id = sub.id
-JOIN instructors inst ON ci.instructor_id = inst.id
-WHERE sub.sessions_per_week = 0.5 AND ci.semester = '2024-2'
-ORDER BY sec.year_level, sec.language;
+WHERE ci.semester = '2024-2'
+GROUP BY inst.id, inst.name, inst.type
+ORDER BY inst.type, required_sessions DESC;

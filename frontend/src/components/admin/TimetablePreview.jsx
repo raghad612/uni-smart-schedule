@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 
 const slotDetails = {
   1: { label: 'Session 1', time: '08:00–09:40', period: 'morning' },
@@ -22,11 +23,11 @@ export default function TimetablePreview({
   const navigate = useNavigate();
 
   // Split conflicts into two categories:
-  // 1. no_available_slot → show in banner (these have slot_id = null, nothing to highlight)
+  // 1. incomplete_assignment → show in banner (these have slot_id = null, nothing to highlight)
   // 2. instructor_double_booked / room_double_booked → highlight cells red (these have slot_id)
-  const noSlotConflicts = conflicts.filter(c => c.conflict_type === 'no_available_slot');
+  const noSlotConflicts = conflicts.filter(c => c.conflict_type === 'incomplete_assignment');
   const cellConflicts = conflicts.filter(
-    c => c.conflict_type !== 'no_available_slot' && c.slot_id != null
+    c => c.conflict_type !== 'incomplete_assignment' && c.slot_id != null
   );
   const conflictSlotIds = new Set(cellConflicts.map(c => c.slot_id));
 
@@ -43,7 +44,7 @@ export default function TimetablePreview({
                 {noSlotConflicts.length} Course{noSlotConflicts.length !== 1 ? 's' : ''} Could Not Be Scheduled
               </h4>
               <p className="text-[10px] text-yellow-400/60 uppercase tracking-wider">
-                No available slot was found for these courses — all submitted slots were already taken
+                One or more required sessions could not be scheduled — open the conflict report to see which
               </p>
             </div>
           </div>
@@ -221,15 +222,24 @@ export default function TimetablePreview({
                       </td>
                       {days.map((_, dayIdx) => {
                         const slotId = dayIdx * 5 + slotNum;
-                        const assignment = proposal.assignments?.find(a => a.slot_id === slotId);
+                        const cellAssignments = (proposal.assignments || []).filter(
+                          a => a.slot_id === slotId
+                        );
                         const hasConflict = conflictSlotIds.has(slotId);
 
+                       // Any locked assignment in the cell flips the whole
+                        // card to amber so admins spot locks at a glance.
+                        // Conflicts still win the visual battle (red > amber)
+                        // because conflicts are urgent.
+                        const hasLock = cellAssignments.some(a => a.locked);
                         return (
-                          <td key={dayIdx} className="min-w-[130px]">
-                            {assignment ? (
-                              <div className={`p-3 rounded-2xl border transition-all cursor-pointer ${
+                          <td key={dayIdx} className="min-w-[130px] align-top">
+                            {cellAssignments.length > 0 ? (
+                              <div className={`p-3 rounded-2xl border transition-all ${
                                 hasConflict
                                   ? 'bg-red-500/15 border-red-500/40 hover:bg-red-500/25'
+                                  : hasLock
+                                  ? 'bg-amber-500/10 border-amber-500/40 hover:bg-amber-500/20'
                                   : 'bg-blue-500/10 border-blue-500/20 hover:bg-blue-500/20'
                               }`}>
                                 {hasConflict && (
@@ -237,17 +247,59 @@ export default function TimetablePreview({
                                     ⚠ Conflict
                                   </div>
                                 )}
-                                <div className={`text-[9px] font-black truncate uppercase tracking-tighter mb-1 ${
-                                  hasConflict ? 'text-red-400' : 'text-blue-400'
-                                }`}>
-                                  {assignment.subject_name}
-                                </div>
-                                <div className="text-[10px] font-bold text-white/90 truncate leading-tight capitalize">
-                                  {assignment.instructor_name}
-                                </div>
-                                <div className="text-[8px] text-white/20 mt-1.5 uppercase font-bold">
-                                  Rm: {assignment.room_name}
-                                </div>
+                                {cellAssignments.map((assignment, idx) => {
+                                  const rotation = assignment.week_rotation;
+                                  const showBadge = rotation === 'WEEK_A' || rotation === 'WEEK_B';
+                                  const isLocked = !!assignment.locked;
+                                  return (
+                                    <div
+                                      key={assignment.id ?? idx}
+                                      className={idx > 0 ? 'mt-2 pt-2 border-t border-white/10' : ''}
+                                    >
+                                      <div className="flex items-center gap-1 mb-1">
+                                        {showBadge && (
+                                          <span className={`inline-block text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${
+                                            rotation === 'WEEK_A'
+                                              ? 'bg-indigo-500/20 text-indigo-300'
+                                              : 'bg-pink-500/20 text-pink-300'
+                                          }`}>
+                                            {rotation === 'WEEK_A' ? 'Week A' : 'Week B'}
+                                          </span>
+                                        )}
+                                        {isLocked && (
+                                          <span
+                                            title="This assignment is locked and will carry over to future schedules."
+                                            className="inline-flex items-center gap-1 text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                                          >
+                                            <Lock className="w-2.5 h-2.5" />
+                                            Locked
+                                          </span>
+                                        )}
+                                      </div>
+                                      {/* Original Week A/B div was here - now consolidated above */}
+                                      {false && showBadge && (
+                                        <div className={`inline-block text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded mb-1 ${
+                                          rotation === 'WEEK_A'
+                                            ? 'bg-indigo-500/20 text-indigo-300'
+                                            : 'bg-pink-500/20 text-pink-300'
+                                        }`}>
+                                          {rotation === 'WEEK_A' ? 'Week A' : 'Week B'}
+                                        </div>
+                                      )}
+                                      <div className={`text-[9px] font-black truncate uppercase tracking-tighter mb-1 ${
+                                        hasConflict ? 'text-red-400' : 'text-blue-400'
+                                      }`}>
+                                        {assignment.subject_name}
+                                      </div>
+                                      <div className="text-[10px] font-bold text-white/90 truncate leading-tight capitalize">
+                                        {assignment.instructor_name}
+                                      </div>
+                                      <div className="text-[8px] text-white/20 mt-1 uppercase font-bold">
+                                        Rm: {assignment.room_name}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             ) : (
                               <div className={`h-16 rounded-2xl border border-dashed flex items-center justify-center ${

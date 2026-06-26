@@ -119,9 +119,9 @@ export default function InstructorPortal() {
   const [semesterPeriod, setSemesterPeriod] = useState('2');
   const semester = `${semesterYear}-${semesterPeriod}`;
 
-  const { data: instructorProfile, isLoading: profileLoading } = useQuery({
-    queryKey: ['instructor-profile'],
-    queryFn: () => api.get('/instructors/me').then(r => r.data),
+const { data: instructorProfile, isLoading: profileLoading } = useQuery({
+    queryKey: ['instructor-profile', semesterPeriod],
+    queryFn: () => api.get(`/instructors/me?period=${semesterPeriod}`).then(r => r.data),
     retry: false,
   });
 
