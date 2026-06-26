@@ -13,6 +13,7 @@ Universities currently schedule instructors manually using Excel. This causes co
 - Letting instructors submit their weekly availability online
 - Running a scheduling engine that assigns classes automatically, respects preferences, and detects conflicts
 - Giving admins a dashboard to review proposals, resolve conflicts, and approve the final schedule
+- Letting admins pin (lock) individual sessions so they survive engine re-runs — useful when a particular placement is correct and shouldn't be re-optimised away
 - Letting instructors see their approved schedule in a personal portal
 
 ---
@@ -101,6 +102,10 @@ The core algorithm runs in 8 steps:
 
 Gap score formula: `gap = (max_slot - min_slot) - (num_sessions - 1)` — lower is better, 0 is perfect.
 
+### Locks and carry-forward
+
+Admins can lock any assignment in a draft proposal. Locked assignments are protected from the gap optimiser (step 7), can't be moved by accident, and are carried forward into the next proposal generated for the same semester — the engine reads the most recent draft, validates each lock against current data, pre-places the valid ones, and surfaces any that couldn't carry over (e.g. because the course was deleted) as `lock_carried_invalid` conflict rows. See `docs/architecture.md` for the full design.
+
 ---
 
 ## Running the tests
@@ -111,7 +116,7 @@ cd backend
 pytest tests/ -v
 ```
 
-12 tests covering: gap score formula, priority sort, conflict detection, and 4 optimiser safety guards.
+80 tests covering: auth, scheduling engine internals (gap score, priority sort, conflict detection, lock-aware optimiser, inherited locks), API endpoints (proposals, assignments, lock toggle, locked-summary), and conflict resolution.
 
 ---
 
@@ -124,7 +129,9 @@ pytest tests/ -v
 | POST | `/availability/` | Submit availability slots |
 | POST | `/scheduling/run` | Run the scheduling engine |
 | GET | `/proposals/` | List all proposals |
+| GET | `/proposals/locked-summary` | Locks that will carry forward on next run |
 | POST | `/proposals/{id}/approve` | Approve a proposal |
+| PUT | `/proposals/{id}/assignments/{aid}/lock` | Toggle lock on an assignment |
 | GET | `/proposals/{id}/conflicts` | List conflicts for a proposal |
 | POST | `/conflicts/{id}/resolve` | Mark a conflict as resolved |
 | POST | `/proposals/{id}/clone` | Clone a proposal as new draft |
