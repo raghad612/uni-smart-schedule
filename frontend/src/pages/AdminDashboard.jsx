@@ -86,6 +86,7 @@ export default function AdminDashboard() {
       {selectedInstructor && (
         <AvailabilityModal
           instructor={selectedInstructor}
+          semester={semester}
           onClose={() => setSelectedInstructor(null)}
         />
       )}

@@ -78,20 +78,20 @@ export function useAdminDashboard() {
   const instructorIdsKey = instructorIds.join(',');
 
   const { data: allAvailability = [] } = useQuery({
-    queryKey: ['all-availability', instructorIdsKey],
+    queryKey: ['all-availability', instructorIdsKey, semester],
     queryFn: async () => {
       const results = await Promise.all(
         instructorIds.map(id =>
-          api.get(`/availability/${id}`)
+          api.get(`/availability/${id}?semester=${semester}`)
             .then(r => ({ instructor_id: id, count: r.data.length }))
             .catch(() => ({ instructor_id: id, count: 0 }))
         )
       );
       return results;
     },
-    enabled: instructorIds.length > 0,
+    enabled: instructorIds.length > 0 && !!semester,
   });
-
+  
   const availabilityMap = Object.fromEntries(
     allAvailability.map(a => [a.instructor_id, a.count > 0])
   );
