@@ -18,10 +18,11 @@ const prefConfig = {
   NONE:      { label: 'Not set',   short: '–', color: 'rgba(255,255,255,0.12)', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.06)' },
 };
 
-export default function AvailabilityModal({ instructor, onClose }) {
+export default function AvailabilityModal({ instructor, semester, onClose }) {
   const { data: availability = [], isLoading } = useQuery({
-    queryKey: ['availability', instructor.id],
-    queryFn: () => api.get(`/availability/${instructor.id}`).then(r => r.data),
+    queryKey: ['availability', instructor.id, semester],
+    queryFn: () => api.get(`/availability/${instructor.id}?semester=${semester}`).then(r => r.data),
+    enabled: !!semester,
   });
 
   const slotMap = Object.fromEntries(

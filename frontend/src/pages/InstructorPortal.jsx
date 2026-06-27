@@ -138,19 +138,10 @@ const { data: instructorProfile, isLoading: profileLoading } = useQuery({
 
   const submitMutation = useMutation({
     mutationFn: async (payload) => {
-      const preferred = payload.filter(s => s.preference === 'PREFERRED').map(s => s.slot_id);
-      const available = payload.filter(s => s.preference === 'AVAILABLE').map(s => s.slot_id);
-      const busy = payload.filter(s => s.preference === 'BUSY').map(s => s.slot_id);
-
-      const calls = [];
-      if (preferred.length) calls.push(api.post('/availability/', { slot_ids: preferred, preference: 'PREFERRED', semester }));
-      if (available.length) calls.push(api.post('/availability/', { slot_ids: available, preference: 'AVAILABLE', semester }));
-      if (busy.length) calls.push(api.post('/availability/', { slot_ids: busy, preference: 'BUSY', semester }));
-      if (!preferred.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'PREFERRED', semester }));
-      if (!available.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'AVAILABLE', semester }));
-      if (!busy.length) calls.push(api.post('/availability/', { slot_ids: [], preference: 'BUSY', semester }));
-
-      return Promise.all(calls);
+      // Replace-on-submit: send all entries in one atomic PUT.
+      // Backend deletes all existing rows for (instructor, semester) then inserts these.
+      const entries = payload.map(s => ({ slot_id: s.slot_id, preference: s.preference }));
+      return api.put('/availability/', { semester, entries });
     },
     onSuccess: () => {
       toast.success('Availability saved! Admin can now schedule your classes.');
