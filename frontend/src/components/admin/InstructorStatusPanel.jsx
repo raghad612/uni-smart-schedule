@@ -9,10 +9,10 @@ export default function InstructorStatusPanel({
   onSelectInstructor,
 }) {
   return (
-    <div className="px-5 sm:px-6 pb-5 sm:pb-6">
+    <div className="px-4 sm:px-6 pb-5 sm:pb-6">
       <div className="mb-3">
         <p className="text-[9px] text-white/20 uppercase tracking-widest">
-          Click an instructor to view their availability grid
+          Tap an instructor to view their availability grid
         </p>
       </div>
 
@@ -28,26 +28,26 @@ export default function InstructorStatusPanel({
             <button
               key={i.id}
               onClick={() => onSelectInstructor(i)}
-              className="w-full flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.06] hover:border-blue-500/30 transition-all text-left"
+              className="w-full flex items-center justify-between gap-2 p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.06] hover:border-blue-500/30 transition-all text-left"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
                   availabilityMap[i.id]
                     ? 'bg-green-500'
                     : 'bg-orange-500 animate-pulse'
                 }`} />
-                <div>
-                  <p className="text-xs font-semibold text-white">{i.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-white truncate">{i.name}</p>
                   <p className="text-[10px] opacity-30 uppercase">{i.type}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
                   availabilityMap[i.id]
                     ? 'bg-green-500/10 text-green-400'
                     : 'bg-orange-500/10 text-orange-400'
                 }`}>
-                  {availabilityMap[i.id] ? 'Submitted' : 'Pending'}
+                  {availabilityMap[i.id] ? 'Done' : 'Pending'}
                 </span>
                 <span className="text-white/20 text-xs">›</span>
               </div>
