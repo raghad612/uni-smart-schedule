@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -8,7 +7,6 @@ import { Modal, FormField, inputClass, selectClass, getErrorMessage } from './sh
 const SESSION_TYPES = ['lecture', 'td', 'tp'];
 const SESSION_LABELS = { lecture: 'Lecture', td: 'TD', tp: 'TP' };
 
-// Searchable subject combobox — type to filter existing subjects or create a new one
 function SubjectCombobox({ search, setSearch, onSelect, onCreateNew, showDropdown, setShowDropdown, subjects }) {
   const filtered = subjects.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -59,26 +57,21 @@ function SubjectCombobox({ search, setSearch, onSelect, onCreateNew, showDropdow
 export default function CoursesTab() {
   const qc = useQueryClient();
 
-  // ── UI state ──────────────────────────────────────────────────────────────
   const [selectedSection, setSelectedSection] = useState(null);
   const [activeSemester, setActiveSemester] = useState('1');
 
-  // Add form state
   const [addForm, setAddForm] = useState({ subject_id: null, instructor_id: '', session_type: 'lecture' });
   const [addSearch, setAddSearch] = useState('');
   const [showAddDropdown, setShowAddDropdown] = useState(false);
 
-  // Edit modal state
   const [editModal, setEditModal] = useState(null);
   const [editForm, setEditForm] = useState({ subject_id: null, instructor_id: '', session_type: 'lecture' });
   const [editSearch, setEditSearch] = useState('');
   const [showEditDropdown, setShowEditDropdown] = useState(false);
 
-  // New subject mini-popup state — 'add' | 'edit' | null
   const [newSubjectContext, setNewSubjectContext] = useState(null);
   const [newSubjectForm, setNewSubjectForm] = useState({ code: '', credits: 3, sessions_per_week: 2 });
 
-  // ── Data fetching ─────────────────────────────────────────────────────────
   const { data: sections = [] } = useQuery({
     queryKey: ['sections'],
     queryFn: () => api.get('/sections/').then(r => r.data),
@@ -96,15 +89,11 @@ export default function CoursesTab() {
     queryFn: () => api.get('/courses/').then(r => r.data),
   });
 
-  // ── Derived data ──────────────────────────────────────────────────────────
-  const semester = activeSemester; // "1" or "2" — year-independent
-
-  // Courses belonging to the selected section and semester
+  const semester = activeSemester;
   const sectionCourses = allCourses.filter(
     c => c.section_id === selectedSection?.id && c.semester === semester
   );
 
-  // Instructors already teaching in this section — shown first in dropdown
   const sectionInstructorIds = new Set(sectionCourses.map(c => c.instructor_id));
   const sectionInstructors = instructors.filter(i => sectionInstructorIds.has(i.id));
   const otherInstructors = instructors.filter(i => !sectionInstructorIds.has(i.id));
@@ -112,16 +101,12 @@ export default function CoursesTab() {
   const subjectMap = Object.fromEntries(subjects.map(s => [s.id, s]));
   const instructorMap = Object.fromEntries(instructors.map(i => [i.id, i]));
 
-  // Group sections by year for the left panel
   const sectionsByYear = sections.reduce((acc, s) => {
     if (!acc[s.year_level]) acc[s.year_level] = [];
     acc[s.year_level].push(s);
     return acc;
   }, {});
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
-
-  // Create a brand-new subject inline, then auto-select it in the triggering form
   const createSubjectMutation = useMutation({
     mutationFn: (data) => api.post('/subjects/', data),
     onSuccess: (res) => {
@@ -144,7 +129,6 @@ export default function CoursesTab() {
     onSuccess: () => {
       toast.success('Course added.');
       qc.invalidateQueries(['courses']);
-      // Reset add form but keep section selected
       setAddForm({ subject_id: null, instructor_id: '', session_type: 'lecture' });
       setAddSearch('');
     },
@@ -167,11 +151,8 @@ export default function CoursesTab() {
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
-
   const handleSectionSelect = (section) => {
     setSelectedSection(section);
-    // Reset add form when switching sections
     setAddForm({ subject_id: null, instructor_id: '', session_type: 'lecture' });
     setAddSearch('');
   };
@@ -223,12 +204,11 @@ export default function CoursesTab() {
     });
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex gap-6">
+    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
 
-      {/* ── Left panel: section picker ──────────────────────────────────── */}
-      <div className="w-52 flex-shrink-0">
+      {/* ── Section picker — full width on phone, fixed 208px on desktop ── */}
+      <div className="w-full lg:w-52 flex-shrink-0">
         <p className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-3">Section</p>
 
         {/* Semester toggle */}
@@ -246,34 +226,36 @@ export default function CoursesTab() {
           ))}
         </div>
 
-        {/* Year groups */}
-        {Object.entries(sectionsByYear).sort(([a], [b]) => a - b).map(([year, secs]) => (
-          <div key={year} className="mb-3">
-            <p className="text-[8px] font-black uppercase tracking-widest text-white/20 mb-1.5 px-1">Year {year}</p>
-            {secs.sort((a, b) => a.language.localeCompare(b.language)).map(s => (
-              <button
-                key={s.id}
-                onClick={() => handleSectionSelect(s)}
-                className={`w-full text-left px-3 py-2 rounded-xl mb-1 border transition-all text-xs ${
-                  selectedSection?.id === s.id
-                    ? 'bg-blue-600/20 border-blue-500/40 text-white font-bold'
-                    : 'bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {s.language === 'ENGLISH' ? '🇬🇧' : '🇫🇷'} {s.language === 'ENGLISH' ? 'English' : 'French'}
-              </button>
-            ))}
-          </div>
-        ))}
+        {/* On phone: 2-column grid of sections so it doesn't stretch tall.
+            On desktop: vertical stack as before. */}
+        <div className="grid grid-cols-2 lg:grid-cols-1 gap-x-3 gap-y-1">
+          {Object.entries(sectionsByYear).sort(([a], [b]) => a - b).map(([year, secs]) => (
+            <div key={year} className="mb-3">
+              <p className="text-[8px] font-black uppercase tracking-widest text-white/20 mb-1.5 px-1">Year {year}</p>
+              {secs.sort((a, b) => a.language.localeCompare(b.language)).map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => handleSectionSelect(s)}
+                  className={`w-full text-left px-3 py-2 rounded-xl mb-1 border transition-all text-xs ${
+                    selectedSection?.id === s.id
+                      ? 'bg-blue-600/20 border-blue-500/40 text-white font-bold'
+                      : 'bg-white/[0.02] border-white/5 text-white/40 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  {s.language === 'ENGLISH' ? '🇬🇧' : '🇫🇷'} {s.language === 'ENGLISH' ? 'English' : 'French'}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* ── Right panel: course list + add form ────────────────────────── */}
+      {/* ── Right panel: course list + add form ── */}
       <div className="flex-1 min-w-0">
         {!selectedSection ? (
-          // Empty state
           <div className="flex flex-col items-center justify-center h-64 opacity-20">
             <div className="text-4xl mb-3">👈</div>
-            <p className="text-sm">Select a section to manage its courses.</p>
+            <p className="text-sm text-center">Select a section to manage its courses.</p>
           </div>
         ) : (
           <>
@@ -287,7 +269,7 @@ export default function CoursesTab() {
               </p>
             </div>
 
-            {/* Existing course instances */}
+            {/* Existing course instances — stack action buttons under text on phone */}
             <div className="space-y-2 mb-6">
               {isLoading && <p className="text-white/30 text-xs animate-pulse">Loading...</p>}
               {sectionCourses.length === 0 && !isLoading && (
@@ -299,23 +281,26 @@ export default function CoursesTab() {
                 const subj = subjectMap[c.subject_id];
                 const instr = instructorMap[c.instructor_id];
                 return (
-                  <div key={c.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-                    <div>
-                      <p className="font-bold text-sm">{subj?.name || `Subject #${c.subject_id}`}</p>
-                      <p className="text-[10px] text-white/30 capitalize">
+                  <div
+                    key={c.id}
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-xl bg-white/5 border border-white/5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-sm truncate">{subj?.name || `Subject #${c.subject_id}`}</p>
+                      <p className="text-[10px] text-white/30 capitalize truncate">
                         {instr?.name || `Instructor #${c.instructor_id}`} · {SESSION_LABELS[c.session_type] || c.session_type}
                       </p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-shrink-0">
                       <button
                         onClick={() => openEdit(c)}
-                        className="text-[10px] bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-all"
+                        className="flex-1 sm:flex-none text-[10px] bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-all"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => deleteCourseMutation.mutate(c.id)}
-                        className="text-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg transition-all"
+                        className="flex-1 sm:flex-none text-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg transition-all"
                       >
                         Remove
                       </button>
@@ -326,11 +311,10 @@ export default function CoursesTab() {
             </div>
 
             {/* Inline add form */}
-            <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/10">
+            <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10">
               <p className="text-[9px] font-black uppercase tracking-widest text-white/30 mb-4">Add Course</p>
               <div className="space-y-3">
 
-                {/* Subject combobox */}
                 <FormField label="Subject">
                   <SubjectCombobox
                     search={addSearch}
@@ -346,7 +330,6 @@ export default function CoursesTab() {
                   )}
                 </FormField>
 
-                {/* Instructor dropdown — section instructors first */}
                 <FormField label="Instructor">
                   <select
                     className={selectClass}
@@ -369,14 +352,13 @@ export default function CoursesTab() {
                   </select>
                 </FormField>
 
-                {/* Session type toggle */}
                 <FormField label="Session Type">
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {SESSION_TYPES.map(t => (
                       <button
                         key={t}
                         onClick={() => setAddForm(p => ({ ...p, session_type: t }))}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-widest border transition-all ${
+                        className={`py-2 rounded-xl text-xs font-bold uppercase tracking-widest border transition-all ${
                           addForm.session_type === t
                             ? 'bg-blue-600 border-blue-500 text-white'
                             : 'bg-white/5 border-white/10 text-white/30 hover:text-white'
@@ -401,7 +383,7 @@ export default function CoursesTab() {
         )}
       </div>
 
-      {/* ── Edit modal ───────────────────────────────────────────────────── */}
+      {/* Edit modal */}
       {editModal && (
         <Modal title="Edit Course" onClose={() => setEditModal(null)}>
           <div className="space-y-4">
@@ -443,12 +425,12 @@ export default function CoursesTab() {
             </FormField>
 
             <FormField label="Session Type">
-              <div className="flex gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {SESSION_TYPES.map(t => (
                   <button
                     key={t}
                     onClick={() => setEditForm(p => ({ ...p, session_type: t }))}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-widest border transition-all ${
+                    className={`py-2 rounded-xl text-xs font-bold uppercase tracking-widest border transition-all ${
                       editForm.session_type === t
                         ? 'bg-blue-600 border-blue-500 text-white'
                         : 'bg-white/5 border-white/10 text-white/30 hover:text-white'
@@ -471,7 +453,7 @@ export default function CoursesTab() {
         </Modal>
       )}
 
-      {/* ── New subject mini-popup ───────────────────────────────────────── */}
+      {/* New subject mini-popup */}
       {newSubjectContext && (
         <Modal
           title={`Create subject "${newSubjectContext === 'add' ? addSearch.trim() : editSearch.trim()}"`}
