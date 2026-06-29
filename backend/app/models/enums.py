@@ -56,3 +56,4 @@ class SessionType(enum.Enum):
     lecture = "lecture"
     lab = "lab"
     td = "td"
+    tp = "tp"
