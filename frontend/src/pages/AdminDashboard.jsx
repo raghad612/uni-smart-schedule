@@ -117,8 +117,7 @@ export default function AdminDashboard() {
             sub="Active period" color="#a78bfa" icon="📅" />
         </div>
 
-        <div className="grid lg:grid-cols-12 gap-6 sm:gap-8">
-
+<div className="grid lg:grid-cols-12 gap-6 sm:gap-8 [&>*]:min-w-0">
           {/* ── Left panel ── */}
           <div className="lg:col-span-4 space-y-4 sm:space-y-6">
 
@@ -234,17 +233,17 @@ export default function AdminDashboard() {
 
             {/* Instructor status — no extra wrapper, InstructorStatusPanel provides its own */}
             <div className="rounded-[2rem] bg-white/5 border border-white/10">
-              <div className="flex justify-between items-center px-5 sm:px-6 pt-5 sm:pt-6 pb-3">
-                <p className="text-xs font-black uppercase tracking-widest text-white/30">
-                  {selectedSectionId ? 'Section Instructors' : 'All Instructors'}
-                </p>
-                <input
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  placeholder="Search..."
-                  className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[10px] outline-none w-24"
-                />
-              </div>
+             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 px-4 sm:px-6 pt-5 sm:pt-6 pb-3">
+  <p className="text-xs font-black uppercase tracking-widest text-white/30">
+    {selectedSectionId ? 'Section Instructors' : 'All Instructors'}
+  </p>
+  <input
+    value={searchTerm}
+    onChange={e => setSearchTerm(e.target.value)}
+    placeholder="Search..."
+    className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs outline-none w-full sm:w-32"
+  />
+</div>
               <InstructorStatusPanel
                 instructors={filteredInstructors}
                 availabilityMap={availabilityMap}

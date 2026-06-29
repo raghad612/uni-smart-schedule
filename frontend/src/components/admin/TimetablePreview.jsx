@@ -22,9 +22,6 @@ export default function TimetablePreview({
 }) {
   const navigate = useNavigate();
 
-  // Split conflicts into two categories:
-  // 1. incomplete_assignment → show in banner (these have slot_id = null, nothing to highlight)
-  // 2. instructor_double_booked / room_double_booked → highlight cells red (these have slot_id)
   const noSlotConflicts = conflicts.filter(c => c.conflict_type === 'incomplete_assignment');
   const cellConflicts = conflicts.filter(
     c => c.conflict_type !== 'incomplete_assignment' && c.slot_id != null
@@ -36,15 +33,15 @@ export default function TimetablePreview({
 
       {/* ── Unscheduled Courses Banner ── */}
       {noSlotConflicts.length > 0 && (
-        <div className="mb-4 p-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-xl">📋</span>
-            <div>
-              <h4 className="text-yellow-400 font-bold text-sm">
+        <div className="mb-4 p-3 sm:p-4 rounded-2xl bg-yellow-500/10 border border-yellow-500/20">
+          <div className="flex items-start gap-3 mb-3">
+            <span className="text-xl flex-shrink-0">📋</span>
+            <div className="min-w-0">
+              <h4 className="text-yellow-400 font-bold text-xs sm:text-sm">
                 {noSlotConflicts.length} Course{noSlotConflicts.length !== 1 ? 's' : ''} Could Not Be Scheduled
               </h4>
               <p className="text-[10px] text-yellow-400/60 uppercase tracking-wider">
-                One or more required sessions could not be scheduled — open the conflict report to see which
+                Open the conflict report to see which
               </p>
             </div>
           </div>
@@ -52,18 +49,18 @@ export default function TimetablePreview({
             {noSlotConflicts.map((c, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between bg-yellow-500/5 border border-yellow-500/15 rounded-xl px-3 py-2"
+                className="flex items-center justify-between gap-2 bg-yellow-500/5 border border-yellow-500/15 rounded-xl px-3 py-2"
               >
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[11px] font-bold text-yellow-300 capitalize">
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[11px] font-bold text-yellow-300 capitalize truncate">
                     {c.instructor_name || 'Unknown Instructor'}
                   </span>
-                  <span className="text-[10px] text-white/50">
+                  <span className="text-[10px] text-white/50 truncate">
                     {c.subject_name || 'Unknown Subject'}
                     {c.section_label ? ` · ${c.section_label}` : ''}
                   </span>
                 </div>
-                <span className="text-[8px] font-black text-yellow-500/50 uppercase tracking-widest">
+                <span className="text-[8px] font-black text-yellow-500/50 uppercase tracking-widest flex-shrink-0">
                   Unscheduled
                 </span>
               </div>
@@ -74,28 +71,27 @@ export default function TimetablePreview({
 
       {/* ── Double-booked Conflict Banner ── */}
       {cellConflicts.length > 0 && (
-        <div className="mb-4 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <span className="text-2xl">⚠️</span>
-            <div>
-              <h4 className="text-red-400 font-bold text-sm">
+        <div className="mb-4 p-3 sm:p-4 rounded-2xl bg-red-500/10 border border-red-500/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <span className="text-2xl flex-shrink-0">⚠️</span>
+            <div className="min-w-0">
+              <h4 className="text-red-400 font-bold text-xs sm:text-sm">
                 {cellConflicts.length} Scheduling Conflict{cellConflicts.length !== 1 ? 's' : ''} Detected
               </h4>
               <p className="text-[10px] text-red-400/60 uppercase tracking-wider">
-                Cells highlighted in red — same instructor or room assigned twice in the same slot
+                Cells highlighted in red
               </p>
             </div>
           </div>
           <button
             onClick={() => navigate(`/conflicts/${activeProposal}`)}
-            className="bg-red-500 hover:bg-red-600 text-white text-[10px] font-black px-4 py-2 rounded-lg transition-all"
+            className="bg-red-500 hover:bg-red-600 text-white text-[10px] font-black px-4 py-2 rounded-lg transition-all w-full sm:w-auto flex-shrink-0"
           >
             VIEW LOGS
           </button>
         </div>
       )}
 
-      {/* ── Combined banner when BOTH types exist ── */}
       {noSlotConflicts.length > 0 && cellConflicts.length === 0 && (
         <div className="mb-4 flex justify-end">
           <button
@@ -107,12 +103,12 @@ export default function TimetablePreview({
         </div>
       )}
 
-      <div className="bg-[#0a1628] rounded-[2.5rem] border border-white/10 p-8 shadow-2xl min-h-[600px]">
+      <div className="bg-[#0a1628] rounded-2xl sm:rounded-[2.5rem] border border-white/10 p-3 sm:p-8 shadow-2xl min-h-[400px] sm:min-h-[600px]">
 
         {/* Header row */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 sm:mb-6">
           <div>
-            <h2 className="text-xl font-bold italic text-blue-400">Master Timetable Preview</h2>
+            <h2 className="text-base sm:text-xl font-bold italic text-blue-400">Master Timetable Preview</h2>
             {proposal && (
               <span className="text-[10px] text-white/40 block mt-1">
                 Proposal #{proposal.id} ·{' '}
@@ -125,24 +121,24 @@ export default function TimetablePreview({
           </div>
 
           {proposal && (
-            <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={onApprove}
                 disabled={isApprovePending || proposal.status === 'approved'}
-                className="bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase disabled:opacity-30"
+                className="flex-1 sm:flex-none bg-green-600 hover:bg-green-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase disabled:opacity-30"
               >
                 Approve
               </button>
               <button
                 onClick={onReject}
                 disabled={isRejectPending || proposal.status === 'rejected' || proposal.status === 'approved'}
-                className="bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase disabled:opacity-30"
+                className="flex-1 sm:flex-none bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase disabled:opacity-30"
               >
                 Reject
               </button>
               <button
                 onClick={() => navigate(`/schedule?proposalId=${activeProposal}`)}
-                className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase border border-white/10"
+                className="flex-1 sm:flex-none bg-white/5 hover:bg-white/10 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all uppercase border border-white/10"
               >
                 Full View
               </button>
@@ -150,9 +146,9 @@ export default function TimetablePreview({
           )}
         </div>
 
-        {/* Legend */}
+        {/* Legend — hide on phone (uses too much vertical space), shown on tablet+ */}
         {proposal && (
-          <div className="flex flex-wrap gap-4 mb-6 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+          <div className="hidden sm:flex flex-wrap gap-4 mb-6 p-3 rounded-xl bg-white/[0.02] border border-white/5">
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-sm bg-blue-500/40 border border-blue-500/50" />
               <span className="text-[9px] uppercase tracking-widest text-white/40 font-bold">Assigned class</span>
@@ -180,23 +176,30 @@ export default function TimetablePreview({
           </div>
         )}
 
+        {/* Mobile-only swipe hint */}
+        {proposal && (
+          <div className="sm:hidden mb-3 text-[10px] text-white/30 italic text-center">
+            ← swipe to view full week →
+          </div>
+        )}
+
         {/* Empty state */}
         {!proposal ? (
-          <div className="flex flex-col items-center justify-center h-[400px] opacity-20 border-2 border-dashed border-white/10 rounded-3xl text-center p-10">
+          <div className="flex flex-col items-center justify-center h-[300px] sm:h-[400px] opacity-20 border-2 border-dashed border-white/10 rounded-3xl text-center p-6 sm:p-10">
             <div className="text-5xl mb-4">🗓️</div>
             <p className="text-sm font-medium">No schedule generated yet.</p>
             <p className="text-xs mt-2">Run the engine to generate a schedule.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-separate border-spacing-2">
+          <div className="overflow-x-auto -mx-1 px-1">
+            <table className="w-full border-separate border-spacing-1 sm:border-spacing-2">
               <thead>
                 <tr>
-                  <th className="text-left p-2 text-[9px] uppercase opacity-20 tracking-widest font-black">
+                  <th className="text-left p-1 sm:p-2 text-[9px] uppercase opacity-20 tracking-widest font-black">
                     Timeline
                   </th>
                   {days.map(d => (
-                    <th key={d} className="p-2 text-[9px] uppercase opacity-20 font-black tracking-[0.2em]">
+                    <th key={d} className="p-1 sm:p-2 text-[9px] uppercase opacity-20 font-black tracking-[0.2em]">
                       {d}
                     </th>
                   ))}
@@ -207,8 +210,8 @@ export default function TimetablePreview({
                   const isMorning = slotDetails[slotNum].period === 'morning';
                   return (
                     <tr key={slotNum}>
-                      <td className="p-2 border-r border-white/5 text-left min-w-[110px]">
-                        <div className="text-[11px] font-black text-blue-400 uppercase tracking-tighter">
+                      <td className="p-1 sm:p-2 border-r border-white/5 text-left min-w-[90px] sm:min-w-[110px]">
+                        <div className="text-[10px] sm:text-[11px] font-black text-blue-400 uppercase tracking-tighter">
                           {slotDetails[slotNum].label}
                         </div>
                         <div className="text-[9px] font-medium text-white/30 mt-0.5">
@@ -226,16 +229,11 @@ export default function TimetablePreview({
                           a => a.slot_id === slotId
                         );
                         const hasConflict = conflictSlotIds.has(slotId);
-
-                       // Any locked assignment in the cell flips the whole
-                        // card to amber so admins spot locks at a glance.
-                        // Conflicts still win the visual battle (red > amber)
-                        // because conflicts are urgent.
                         const hasLock = cellAssignments.some(a => a.locked);
                         return (
-                          <td key={dayIdx} className="min-w-[130px] align-top">
+                          <td key={dayIdx} className="min-w-[110px] sm:min-w-[130px] align-top">
                             {cellAssignments.length > 0 ? (
-                              <div className={`p-3 rounded-2xl border transition-all ${
+                              <div className={`p-2 sm:p-3 rounded-2xl border transition-all ${
                                 hasConflict
                                   ? 'bg-red-500/15 border-red-500/40 hover:bg-red-500/25'
                                   : hasLock
@@ -256,7 +254,7 @@ export default function TimetablePreview({
                                       key={assignment.id ?? idx}
                                       className={idx > 0 ? 'mt-2 pt-2 border-t border-white/10' : ''}
                                     >
-                                      <div className="flex items-center gap-1 mb-1">
+                                      <div className="flex items-center gap-1 mb-1 flex-wrap">
                                         {showBadge && (
                                           <span className={`inline-block text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${
                                             rotation === 'WEEK_A'
@@ -276,16 +274,6 @@ export default function TimetablePreview({
                                           </span>
                                         )}
                                       </div>
-                                      {/* Original Week A/B div was here - now consolidated above */}
-                                      {false && showBadge && (
-                                        <div className={`inline-block text-[7px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded mb-1 ${
-                                          rotation === 'WEEK_A'
-                                            ? 'bg-indigo-500/20 text-indigo-300'
-                                            : 'bg-pink-500/20 text-pink-300'
-                                        }`}>
-                                          {rotation === 'WEEK_A' ? 'Week A' : 'Week B'}
-                                        </div>
-                                      )}
                                       <div className={`text-[9px] font-black truncate uppercase tracking-tighter mb-1 ${
                                         hasConflict ? 'text-red-400' : 'text-blue-400'
                                       }`}>
@@ -302,7 +290,7 @@ export default function TimetablePreview({
                                 })}
                               </div>
                             ) : (
-                              <div className={`h-16 rounded-2xl border border-dashed flex items-center justify-center ${
+                              <div className={`h-12 sm:h-16 rounded-2xl border border-dashed flex items-center justify-center ${
                                 isMorning
                                   ? 'bg-orange-500/[0.02] border-orange-500/10'
                                   : 'bg-purple-500/[0.02] border-purple-500/10'
